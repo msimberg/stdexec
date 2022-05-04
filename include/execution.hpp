@@ -2463,9 +2463,6 @@ namespace std::execution {
           __decayed_tuple<_Ts...> operator()(_Ts...) const;
         };
 
-      template <class _SenderId, class _ReceiverId, class _Fun, class _Let>
-        struct __receiver;
-
       template <class... _Ts>
         struct __which_tuple_ : _Ts... {
           using _Ts::operator()...;
@@ -2597,7 +2594,17 @@ namespace std::execution {
         struct __operation;
 
       template <class _SenderId, class _ReceiverId, class _Fun, class _Let>
-        struct __receiver {
+        struct __receiver_impl
+        {
+            struct __receiver_type;
+        };
+
+      template <class _SenderId, class _ReceiverId, class _Fun, class _Let>
+        using __receiver =
+            typename __receiver_impl<_SenderId, _ReceiverId, _Fun, _Let>::__receiver_type;
+
+      template <class _SenderId, class _ReceiverId, class _Fun, class _Let>
+      struct __receiver_impl<_SenderId, _ReceiverId, _Fun, _Let>::__receiver_type {
           using _Sender = __t<_SenderId>;
           using _Receiver = __t<_ReceiverId>;
           _Receiver&& base() && noexcept { return (_Receiver&&) __op_state_->__rcvr_;}
@@ -2614,7 +2621,7 @@ namespace std::execution {
           template <__one_of<_Let> _Tag, class... _As>
               requires __applyable<_Fun, __which_tuple_t<_As...>&> &&
                 sender_to<__apply_result_t<_Fun, __which_tuple_t<_As...>&>, _Receiver>
-            friend void tag_invoke(_Tag, __receiver&& __self, _As&&... __as) noexcept try {
+            friend void tag_invoke(_Tag, __receiver_type&& __self, _As&&... __as) noexcept try {
               using __tuple_t = __which_tuple_t<_As...>;
               using __op_state_t = __mapply<__q<__op_state_for_t>, __tuple_t>;
               auto& __args =
@@ -2631,13 +2638,13 @@ namespace std::execution {
 
           template <__one_of<set_value_t, set_error_t, set_stopped_t> _Tag, class... _As>
               requires __none_of<_Tag, _Let> && tag_invocable<_Tag, _Receiver, _As...>
-            friend void tag_invoke(_Tag __tag, __receiver&& __self, _As&&... __as) noexcept try {
+            friend void tag_invoke(_Tag __tag, __receiver_type&& __self, _As&&... __as) noexcept try {
               __tag(std::move(__self).base(), (_As&&) __as...);
             } catch(...) {
               set_error(std::move(__self).base(), current_exception());
             }
 
-          friend auto tag_invoke(get_env_t, const __receiver& __self)
+          friend auto tag_invoke(get_env_t, const __receiver_type& __self)
             -> env_of_t<_Receiver> {
             return get_env(__self.base());
           }
@@ -2670,7 +2677,17 @@ namespace std::execution {
         };
 
       template <class _SenderId, class _Fun, class _SetId>
-        struct __sender {
+        struct __sender_impl
+        {
+            struct __sender_type;
+        };
+
+      template <class _SenderId, class _Fun, class _SetId>
+        using __sender =
+            typename __sender_impl<_SenderId, _Fun, _SetId>::__sender_type;
+
+      template <class _SenderId, class _Fun, class _SetId>
+      struct __sender_impl<_SenderId, _Fun, _SetId>::__sender_type {
           using _Sender = __t<_SenderId>;
           using _Set = __t<_SetId>;
           template <class _Self, class _Receiver>
@@ -2702,7 +2719,7 @@ namespace std::execution {
                   __q<__concat_completion_signatures_t>>,
                 completion_signatures_of_t<__member_t<_Self, _Sender>, _Env>>;
 
-          template <__decays_to<__sender> _Self, class _Receiver>
+          template <__decays_to<__sender_type> _Self, class _Receiver>
               requires
                 sender_to<__member_t<_Self, _Sender>, __receiver_t<_Self, _Receiver>>
             friend auto tag_invoke(connect_t, _Self&& __self, _Receiver&& __rcvr)
@@ -2716,16 +2733,16 @@ namespace std::execution {
 
           template <__sender_queries::__sender_query _Tag, class... _As>
               requires __callable<_Tag, const _Sender&, _As...>
-            friend auto tag_invoke(_Tag __tag, const __sender& __self, _As&&... __as)
+            friend auto tag_invoke(_Tag __tag, const __sender_type& __self, _As&&... __as)
               noexcept(__nothrow_callable<_Tag, const _Sender&, _As...>)
               -> __call_result_if_t<__sender_queries::__sender_query<_Tag>, _Tag, const _Sender&, _As...> {
               return ((_Tag&&) __tag)(__self.__sndr_, (_As&&) __as...);
             }
 
-          template <__decays_to<__sender> _Self, class _Env>
+          template <__decays_to<__sender_type> _Self, class _Env>
             friend auto tag_invoke(get_completion_signatures_t, _Self&&, _Env)
               -> dependent_completion_signatures<_Env>;
-          template <__decays_to<__sender> _Self, class _Env>
+          template <__decays_to<__sender_type> _Self, class _Env>
             friend auto tag_invoke(get_completion_signatures_t, _Self&&, _Env)
               -> __completions<__member_t<_Self, _Sender>, _Env> requires true;
 
