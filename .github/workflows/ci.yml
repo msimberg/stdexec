@@ -4,8 +4,6 @@ name: CI
 on:
   pull_request:
   push:
-    branches:
-      - main
 
 concurrency:
   group: ${{ github.workflow }}-on-${{ github.event_name }}-from-${{ github.ref_name }}
