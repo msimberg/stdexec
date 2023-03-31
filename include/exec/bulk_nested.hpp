@@ -34,19 +34,19 @@ template <class _ReceiverId, integral _Shape, class _Fun> struct __receiver {
 
     template <class... _As>
     void set_value(_As &&...__as) &&noexcept requires
-        __nothrow_callable<_Fun, _Shape, _As &...> {
+        __nothrow_callable<_Fun, inline_scheduler, _Shape, _As &...> {
       for (_Shape __i{}; __i != __shape_; ++__i) {
-        __f_(__i, __as...);
+        __f_(inline_scheduler{}, __i, __as...);
       }
       stdexec::set_value(std::move(this->base()), (_As &&) __as...);
     }
 
     template <class... _As>
     void set_value(_As &&...__as) &&noexcept requires
-        __callable<_Fun, _Shape, _As &...> {
+        __callable<_Fun, inline_scheduler, _Shape, _As &...> {
       try {
         for (_Shape __i{}; __i != __shape_; ++__i) {
-          __f_(__i, __as...);
+          __f_(inline_scheduler{}, __i, __as...);
         }
         stdexec::set_value(std::move(this->base()), (_As &&) __as...);
       } catch (...) {
@@ -85,7 +85,8 @@ template <class _SenderId, integral _Shape, class _Fun> struct __sender {
         __if_c<__v<__value_types_of_t<
                    _Sender, _Env,
                    __transform<__q<__decay_ref>,
-                               __mbind_front_q<__non_throwing_, _Fun, _Shape>>,
+                               __mbind_front_q<__non_throwing_, _Fun,
+                                               inline_scheduler, _Shape>>,
                    __q<__mand>>>,
                completion_signatures<>, __with_exception_ptr>;
 

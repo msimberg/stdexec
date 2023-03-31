@@ -22,9 +22,15 @@
 #include <stdexec/execution.hpp>
 
 TEST_CASE("bulk_nested compiles", "[adaptors][bulk_nested]") {
-  stdexec::sender auto snd =
-      exec::bulk_nested(stdexec::just(42), 10, [](auto idx, int x) {
-        std::cerr << "hello from index " << idx << " with x = " << x << '\n';
+  stdexec::sender auto snd = exec::bulk_nested(
+      stdexec::just(42), 10, [](stdexec::scheduler auto sch, int i, int &x) {
+        std::cerr << "hello from outer index " << i << " with x = " << x
+                  << '\n';
+        stdexec::sync_wait(
+            stdexec::schedule(sch) |
+            exec::bulk_nested(3, [](stdexec::scheduler auto, int j) {
+              std::cerr << "hello from inner index " << j << '\n';
+            }));
       });
   stdexec::sync_wait(std::move(snd));
 }
