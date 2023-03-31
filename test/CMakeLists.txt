@@ -63,6 +63,7 @@ set(stdexec_test_sources
     exec/test_task.cpp
     exec/test_variant_sender.cpp
     exec/test_type_async_scope.cpp
+    exec/test_bulk_nested.cpp
     exec/test_create.cpp
     exec/test_env.cpp
     exec/test_finally.cpp
