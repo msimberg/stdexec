@@ -165,7 +165,7 @@ namespace nvexec::STDEXEC_STREAM_DETAIL_NS {
 
         template <class R>
         friend auto tag_invoke(stdexec::connect_t, __sender, R&& rec) //
-          noexcept(std::is_nothrow_constructible_v<stdexec::__decay_t<R>, R>)
+          noexcept
             -> __op<stdexec::__x<stdexec::__decay_t<R>>> {
           return {(R&&) rec};
         }
@@ -193,6 +193,55 @@ namespace nvexec::STDEXEC_STREAM_DETAIL_NS {
       }
 
       bool operator==(const device_scheduler&) const noexcept = default;
+
+      template <class Data>
+      struct sync_wait_receiver : stdexec::receiver_adaptor<sync_wait_receiver<Data>> {
+        Data& data_;
+
+        sync_wait_receiver(Data& data) : data_(data) {}
+
+        template <class... _As>
+        void set_value(_As&&... as) noexcept {
+          data_.template emplace<1>((_As) as...);
+        }
+
+        template <class _E>
+        void set_error(_E&&) noexcept {
+          // TODO: We can't throw on a GPU. Should sync_wait return a
+          // std::expected instead?
+          assert(false);
+        }
+
+        void set_stopped() noexcept {
+          data_.emplace<2>();
+        }
+
+        stdexec::empty_env get_env() const {
+          return {};
+        }
+      };
+
+      template <stdexec::sender S>
+      friend std::optional<stdexec::value_types_of_t<S, stdexec::empty_env, stdexec::__decayed_tuple, stdexec::__msingle>>
+      tag_invoke(stdexec::sync_wait_t, const device_scheduler& self, S&& sndr) {
+        using value_t = stdexec::value_types_of_t<S, stdexec::empty_env, stdexec::__decayed_tuple, stdexec::__msingle>;
+        using data_t = std::variant<std::monostate, value_t, stdexec::set_stopped_t>;
+        data_t __data{};
+        using receiver_t = sync_wait_receiver<data_t>;
+
+        stdexec::operation_state auto __op_state = stdexec::connect((S&&) sndr, receiver_t{__data});
+        stdexec::start(__op_state);
+
+        // TODO: Can this do anything but inline execution? We expect the result
+        // to have been filled in by start.
+        // return std::nullopt;
+        assert(__data.index() == 1 || __data.index() == 2);
+
+        if (__data.index() == 2)
+         return std::nullopt;
+
+        return std::move(std::get<1>(__data));
+      }
     };
 
     template <std::integral Shape, class Fun, class... As>
