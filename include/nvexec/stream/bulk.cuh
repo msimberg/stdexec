@@ -16,6 +16,7 @@
 #pragma once
 
 #include "../../stdexec/execution.hpp"
+#include "../../exec/bulk_nested.hpp"
 #include <type_traits>
 
 #include "common.cuh"
@@ -100,6 +101,128 @@ namespace nvexec::STDEXEC_STREAM_DETAIL_NS {
 
       template <class Receiver>
       using receiver_t = stdexec::__t<bulk::receiver_t<stdexec::__id<Receiver>, Shape, Fun>>;
+
+      template <class... Tys>
+      using set_value_t = stdexec::completion_signatures< stdexec::set_value_t(Tys...)>;
+
+      template <class Self, class Env>
+      using completion_signatures = //
+        stdexec::__make_completion_signatures<
+          stdexec::__copy_cvref_t<Self, Sender>,
+          Env,
+          set_error_t,
+          stdexec::__q<set_value_t>>;
+
+      template <stdexec::__decays_to<__t> Self, stdexec::receiver Receiver>
+        requires stdexec::receiver_of<
+          Receiver,
+          completion_signatures<Self, stdexec::env_of_t<Receiver>>>
+      friend auto tag_invoke(stdexec::connect_t, Self&& self, Receiver&& rcvr)
+        -> stream_op_state_t<stdexec::__copy_cvref_t<Self, Sender>, receiver_t<Receiver>, Receiver> {
+        return stream_op_state<stdexec::__copy_cvref_t<Self, Sender>>(
+          ((Self&&) self).sndr_,
+          (Receiver&&) rcvr,
+          [&](operation_state_base_t<stdexec::__id<Receiver>>& stream_provider)
+            -> receiver_t<Receiver> {
+            return receiver_t<Receiver>(self.shape_, self.fun_, stream_provider);
+          });
+      }
+
+      template <stdexec::__decays_to<__t> Self, class Env>
+      friend auto tag_invoke(stdexec::get_completion_signatures_t, Self&&, Env)
+        -> stdexec::dependent_completion_signatures<Env>;
+
+      template <stdexec::__decays_to<__t> Self, class Env>
+      friend auto tag_invoke(stdexec::get_completion_signatures_t, Self&&, Env)
+        -> completion_signatures<Self, Env>
+        requires true;
+
+      friend auto tag_invoke(stdexec::get_env_t, const __t& self) //
+        noexcept(stdexec::__nothrow_callable<stdexec::get_env_t, const Sender&>)
+          -> stdexec::__call_result_t<stdexec::get_env_t, const Sender&> {
+        return stdexec::get_env(self.sndr_);
+      }
+    };
+  };
+
+  namespace bulk_nested {
+    template <int BlockThreads, std::integral Shape, class Fun, class... As>
+    __launch_bounds__(BlockThreads) __global__ void kernel(Shape shape, Fun fn, As... as) {
+      const int tid = static_cast<int>(threadIdx.x + blockIdx.x * blockDim.x);
+
+      if (tid < static_cast<int>(shape)) {
+        fn(tid, as...);
+      }
+    }
+
+    template <class ReceiverId, std::integral Shape, class Fun>
+    struct receiver_t {
+      class __t : public stream_receiver_base {
+        using Receiver = stdexec::__t<ReceiverId>;
+        using Env = typename operation_state_base_t<ReceiverId>::env_t;
+
+        Shape shape_;
+        Fun f_;
+
+        operation_state_base_t<ReceiverId>& op_state_;
+
+       public:
+        using __id = receiver_t;
+
+        template <class... As>
+        friend void tag_invoke(stdexec::set_value_t, __t&& self, As&&... as) noexcept
+          requires stdexec::__callable<Fun, Shape, As&...>
+        {
+          operation_state_base_t<ReceiverId>& op_state = self.op_state_;
+
+          if (self.shape_) {
+            cudaStream_t stream = op_state.get_stream();
+            constexpr int block_threads = 256;
+            const int grid_blocks = (static_cast<int>(self.shape_) + block_threads - 1)
+                                  / block_threads;
+            kernel<block_threads, Shape, Fun, As...>
+              <<<grid_blocks, block_threads, 0, stream>>>(self.shape_, self.f_, (As&&) as...);
+          }
+
+          if (cudaError_t status = STDEXEC_DBG_ERR(cudaPeekAtLastError()); status == cudaSuccess) {
+            op_state.propagate_completion_signal(stdexec::set_value, (As&&) as...);
+          } else {
+            op_state.propagate_completion_signal(stdexec::set_error, std::move(status));
+          }
+        }
+
+        template <stdexec::__one_of<stdexec::set_error_t, stdexec::set_stopped_t> Tag, class... As>
+        friend void tag_invoke(Tag tag, __t&& self, As&&... as) noexcept {
+          self.op_state_.propagate_completion_signal(tag, (As&&) as...);
+        }
+
+        friend Env tag_invoke(stdexec::get_env_t, const __t& self) noexcept {
+          return self.op_state_.make_env();
+        }
+
+        explicit __t(Shape shape, Fun fun, operation_state_base_t<ReceiverId>& op_state)
+          : shape_(shape)
+          , f_((Fun&&) fun)
+          , op_state_(op_state) {
+        }
+      };
+    };
+  }
+
+  template <class SenderId, std::integral Shape, class Fun>
+  struct bulk_nested_sender_t {
+    using Sender = stdexec::__t<SenderId>;
+
+    struct __t : stream_sender_base {
+      using __id = bulk_nested_sender_t;
+      Sender sndr_;
+      Shape shape_;
+      Fun fun_;
+
+      using set_error_t = stdexec::completion_signatures< stdexec::set_error_t(cudaError_t)>;
+
+      template <class Receiver>
+      using receiver_t = stdexec::__t<bulk_nested::receiver_t<stdexec::__id<Receiver>, Shape, Fun>>;
 
       template <class... Tys>
       using set_value_t = stdexec::completion_signatures< stdexec::set_value_t(Tys...)>;

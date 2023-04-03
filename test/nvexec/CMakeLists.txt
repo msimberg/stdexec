@@ -25,6 +25,7 @@ set(nvexec_test_sources
     test_main.cpp
     then.cpp
     bulk.cpp
+    bulk_nested.cpp
     when_all.cpp
     transfer_when_all.cpp
     let_value.cpp
