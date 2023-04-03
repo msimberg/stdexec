@@ -146,9 +146,58 @@ namespace nvexec::STDEXEC_STREAM_DETAIL_NS {
   };
 
   namespace bulk_nested {
+    // This is a simple inline scheduler for use on a GPU device. It doesn't do
+    // much by itself, but serves as a tag type for customizations.
+    struct device_scheduler {
+      template <class R_>
+      struct __op {
+        using R = stdexec::__t<R_>;
+        [[no_unique_address]] R rec_;
+
+        friend void tag_invoke(stdexec::start_t, __op& op) noexcept {
+          stdexec::set_value((R&&) op.rec_);
+        }
+      };
+
+      struct __sender {
+        using is_sender = void;
+        using completion_signatures = stdexec::completion_signatures<stdexec::set_value_t()>;
+
+        template <class R>
+        friend auto tag_invoke(stdexec::connect_t, __sender, R&& rec) //
+          noexcept(std::is_nothrow_constructible_v<stdexec::__decay_t<R>, R>)
+            -> __op<stdexec::__x<stdexec::__decay_t<R>>> {
+          return {(R&&) rec};
+        }
+
+        struct __env {
+          friend device_scheduler
+            tag_invoke(stdexec::get_completion_scheduler_t<stdexec::set_value_t>, const __env&) //
+            noexcept {
+            return {};
+          }
+        };
+
+        friend __env tag_invoke(stdexec::get_env_t, const __sender&) noexcept {
+          return {};
+        }
+      };
+
+      friend __sender tag_invoke(stdexec::schedule_t, const device_scheduler&) noexcept {
+        return {};
+      }
+
+      friend stdexec::forward_progress_guarantee
+        tag_invoke(stdexec::get_forward_progress_guarantee_t, const device_scheduler&) noexcept {
+        return stdexec::forward_progress_guarantee::weakly_parallel;
+      }
+
+      bool operator==(const device_scheduler&) const noexcept = default;
+    };
+
     template <std::integral Shape, class Fun, class... As>
     __global__ void kernel(Shape shape, Fun fn, As... as) {
-      fn(exec::inline_scheduler{}, blockIdx.x, as...);
+      fn(device_scheduler{}, blockIdx.x, as...);
     }
 
     template <class ReceiverId, std::integral Shape, std::size_t N, class Fun>
@@ -167,7 +216,7 @@ namespace nvexec::STDEXEC_STREAM_DETAIL_NS {
 
         template <class... As>
         friend void tag_invoke(stdexec::set_value_t, __t&& self, As&&... as) noexcept
-          requires stdexec::__callable<Fun, exec::inline_scheduler, Shape, As&...>
+          requires stdexec::__callable<Fun, device_scheduler, Shape, As&...>
         {
           operation_state_base_t<ReceiverId>& op_state = self.op_state_;
 
