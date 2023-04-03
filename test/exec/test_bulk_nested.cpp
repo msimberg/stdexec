@@ -18,19 +18,42 @@
 
 #include <catch2/catch.hpp>
 #include <exec/bulk_nested.hpp>
+#include <exec/static_thread_pool.hpp>
 #include <iostream>
 #include <stdexec/execution.hpp>
 
 TEST_CASE("bulk_nested compiles", "[adaptors][bulk_nested]") {
   stdexec::sender auto snd = exec::bulk_nested(
       stdexec::just(42), 10, [](stdexec::scheduler auto sch, int i, int &x) {
-        std::cerr << "hello from outer index " << i << " with x = " << x
-                  << '\n';
+        std::cerr << "hello from outer index " << i
+                  << " with inline scheduler\n";
         stdexec::sync_wait(
             stdexec::schedule(sch) |
             exec::bulk_nested(3, [](stdexec::scheduler auto, int j) {
-              std::cerr << "hello from inner index " << j << '\n';
+              std::cerr << "hello from inner index " << j
+                        << " with subscheduler of inline scheduler\n";
             }));
       });
+  stdexec::sync_wait(std::move(snd));
+}
+
+TEST_CASE("bulk_nested compiles with thread pool scheduler",
+          "[adaptors][bulk_nested]") {
+  exec::static_thread_pool pool_{2};
+
+  stdexec::sender auto snd =
+      stdexec::transfer_just(pool_.get_scheduler(), 42) |
+      exec::bulk_nested(
+          10, [](stdexec::scheduler auto sch, int i, int &x) {
+            std::cerr << "hello from outer index " << i
+                      << " with static thread pool scheduler\n";
+            stdexec::sync_wait(
+                stdexec::schedule(sch) |
+                exec::bulk_nested(3, [](stdexec::scheduler auto, int j) {
+                  std::cerr
+                      << "hello from inner index " << j
+                      << " with subscheduler of static thread pool scheduler\n";
+                }));
+          });
   stdexec::sync_wait(std::move(snd));
 }
