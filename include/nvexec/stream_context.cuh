@@ -47,9 +47,9 @@ namespace nvexec {
     using bulk_sender_th =
       stdexec::__t<bulk_sender_t<stdexec::__id<stdexec::__decay_t<Sender>>, Shape, Fun>>;
 
-    template <stdexec::sender Sender, std::integral Shape, class Fun>
+    template <stdexec::sender Sender, std::integral Shape, std::size_t N, class Fun>
     using bulk_nested_sender_th =
-      stdexec::__t<bulk_nested_sender_t<stdexec::__id<stdexec::__decay_t<Sender>>, Shape, Fun>>;
+      stdexec::__t<bulk_nested_sender_t<stdexec::__id<stdexec::__decay_t<Sender>>, Shape, N, Fun>>;
 
     template <stdexec::sender Sender>
     using split_sender_th = stdexec::__t<split_sender_t<stdexec::__id<stdexec::__decay_t<Sender>>>>;
@@ -173,15 +173,13 @@ namespace nvexec {
 
       template <stdexec::sender S, std::integral Shape, std::size_t N, class Fn>
       // TODO: Compute return type?
-      friend auto
+      friend bulk_nested_sender_th<S, Shape, N, Fn>
         tag_invoke(exec::bulk_nested_t, const stream_scheduler& sch, S&& sndr, std::array<Shape, N> shape, Fn fun) //
         noexcept {
-        auto fun_sched = [fun = (Fn&&) fun](Shape i, auto&... ts) mutable noexcept {
-          fun(exec::inline_scheduler{}, i, ts...);
-        };
         // TODO: Is an "empty" hierarchy {} useful?
         static_assert(N >= 1);
-        return bulk_nested_sender_th<S, Shape, decltype(fun_sched)>{{}, (S&&) sndr, shape[0], std::move(fun_sched)};
+        // return bulk_nested_sender_th<S, Shape, N, decltype(fun_sched)>{{}, (S&&) sndr, shape, std::move(fun_sched)};
+        return bulk_nested_sender_th<S, Shape, N, Fn>{{}, (S&&) sndr, shape, (Fn&&) fun};
       }
 
       template <stdexec::sender S, class Fn>

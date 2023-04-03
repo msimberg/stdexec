@@ -146,22 +146,18 @@ namespace nvexec::STDEXEC_STREAM_DETAIL_NS {
   };
 
   namespace bulk_nested {
-    template <int BlockThreads, std::integral Shape, class Fun, class... As>
-    __launch_bounds__(BlockThreads) __global__ void kernel(Shape shape, Fun fn, As... as) {
-      const int tid = static_cast<int>(threadIdx.x + blockIdx.x * blockDim.x);
-
-      if (tid < static_cast<int>(shape)) {
-        fn(tid, as...);
-      }
+    template <std::integral Shape, class Fun, class... As>
+    __global__ void kernel(Shape shape, Fun fn, As... as) {
+      fn(exec::inline_scheduler{}, blockIdx.x, as...);
     }
 
-    template <class ReceiverId, std::integral Shape, class Fun>
+    template <class ReceiverId, std::integral Shape, std::size_t N, class Fun>
     struct receiver_t {
       class __t : public stream_receiver_base {
         using Receiver = stdexec::__t<ReceiverId>;
         using Env = typename operation_state_base_t<ReceiverId>::env_t;
 
-        Shape shape_;
+        std::array<Shape, N> shape_;
         Fun f_;
 
         operation_state_base_t<ReceiverId>& op_state_;
@@ -171,17 +167,18 @@ namespace nvexec::STDEXEC_STREAM_DETAIL_NS {
 
         template <class... As>
         friend void tag_invoke(stdexec::set_value_t, __t&& self, As&&... as) noexcept
-          requires stdexec::__callable<Fun, Shape, As&...>
+          requires stdexec::__callable<Fun, exec::inline_scheduler, Shape, As&...>
         {
           operation_state_base_t<ReceiverId>& op_state = self.op_state_;
 
-          if (self.shape_) {
-            cudaStream_t stream = op_state.get_stream();
-            constexpr int block_threads = 256;
-            const int grid_blocks = (static_cast<int>(self.shape_) + block_threads - 1)
-                                  / block_threads;
-            kernel<block_threads, Shape, Fun, As...>
-              <<<grid_blocks, block_threads, 0, stream>>>(self.shape_, self.f_, (As&&) as...);
+          if constexpr (N >= 1) {
+            if (self.shape_[0]) {
+              cudaStream_t stream = op_state.get_stream();
+              const int grid_blocks = self.shape_[0];
+              constexpr int block_threads = 1;
+              kernel<Shape, Fun, As...>
+                <<<grid_blocks, block_threads, 0, stream>>>(block_threads, self.f_, (As&&) as...);
+            }
           }
 
           if (cudaError_t status = STDEXEC_DBG_ERR(cudaPeekAtLastError()); status == cudaSuccess) {
@@ -200,7 +197,7 @@ namespace nvexec::STDEXEC_STREAM_DETAIL_NS {
           return self.op_state_.make_env();
         }
 
-        explicit __t(Shape shape, Fun fun, operation_state_base_t<ReceiverId>& op_state)
+        explicit __t(std::array<Shape, N> shape, Fun fun, operation_state_base_t<ReceiverId>& op_state)
           : shape_(shape)
           , f_((Fun&&) fun)
           , op_state_(op_state) {
@@ -209,20 +206,20 @@ namespace nvexec::STDEXEC_STREAM_DETAIL_NS {
     };
   }
 
-  template <class SenderId, std::integral Shape, class Fun>
+  template <class SenderId, std::integral Shape, std::size_t N, class Fun>
   struct bulk_nested_sender_t {
     using Sender = stdexec::__t<SenderId>;
 
     struct __t : stream_sender_base {
       using __id = bulk_nested_sender_t;
       Sender sndr_;
-      Shape shape_;
+      std::array<Shape, N> shape_;
       Fun fun_;
 
       using set_error_t = stdexec::completion_signatures< stdexec::set_error_t(cudaError_t)>;
 
       template <class Receiver>
-      using receiver_t = stdexec::__t<bulk_nested::receiver_t<stdexec::__id<Receiver>, Shape, Fun>>;
+      using receiver_t = stdexec::__t<bulk_nested::receiver_t<stdexec::__id<Receiver>, Shape, N, Fun>>;
 
       template <class... Tys>
       using set_value_t = stdexec::completion_signatures< stdexec::set_value_t(Tys...)>;
