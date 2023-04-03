@@ -175,7 +175,16 @@ namespace nvexec::STDEXEC_STREAM_DETAIL_NS {
             if (self.shape_[0]) {
               cudaStream_t stream = op_state.get_stream();
               const int grid_blocks = self.shape_[0];
-              constexpr int block_threads = 1;
+              const int block_threads = [&]{
+                if constexpr (N >= 2) {
+                  return self.shape_[1];
+                } else {
+                  return 1;
+                }
+
+                // This is only to silence nvc++
+                return 1;
+              }();
               kernel<Shape, Fun, As...>
                 <<<grid_blocks, block_threads, 0, stream>>>(block_threads, self.f_, (As&&) as...);
             }

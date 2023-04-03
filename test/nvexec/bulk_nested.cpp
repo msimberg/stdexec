@@ -42,6 +42,6 @@ TEST_CASE("bulk_nested compiles with stream context",
 
   stdexec::sender auto snd =
       stdexec::transfer_just(stream_ctx.get_scheduler(), 42) |
-      exec::bulk_nested(std::array{10, 17, 7}, bulk_nested_fn);
+      exec::bulk_nested(std::array{3, 4, 7}, bulk_nested_fn);
   stdexec::sync_wait(std::move(snd));
 }
