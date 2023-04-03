@@ -22,8 +22,10 @@
 #include "../stdexec/__detail/__meta.hpp"
 #include "bulk_nested.hpp"
 
+#include <array>
 #include <atomic>
 #include <condition_variable>
+#include <cstddef>
 #include <exception>
 #include <functional>
 #include <mutex>
@@ -422,13 +424,15 @@ namespace exec {
         return bulk_sender_t<S, Shape, Fn>{*sch.pool_, (S&&) sndr, shape, (Fn&&) fun};
       }
 
-      template <stdexec::sender S, std::integral Shape, class Fn>
+      template <stdexec::sender S, std::integral Shape, std::size_t N, class Fn>
       friend auto
-        tag_invoke(exec::bulk_nested_t, const scheduler& sch, S&& sndr, Shape shape, Fn fun) noexcept {
+        tag_invoke(exec::bulk_nested_t, const scheduler& sch, S&& sndr, std::array<Shape, N> shape, Fn fun) noexcept {
         auto fun_sched = [fun = (Fn&&) fun](Shape i, auto&... ts) mutable noexcept {
           fun(inline_scheduler{}, i, ts...);
         };
-        return bulk_sender_t<S, Shape, decltype(fun_sched)>{*sch.pool_, (S&&) sndr, shape, std::move(fun_sched)};
+        // TODO: Is an "empty" hierarchy {} useful?
+        static_assert(N >= 1);
+        return bulk_sender_t<S, Shape, decltype(fun_sched)>{*sch.pool_, (S&&) sndr, shape[0], std::move(fun_sched)};
       }
 
       friend stdexec::forward_progress_guarantee

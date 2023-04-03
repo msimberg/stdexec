@@ -19,23 +19,30 @@
 #include "../stdexec/execution.hpp"
 #include "inline_scheduler.hpp"
 
+#include <array>
+#include <cstddef>
+
 namespace exec {
 namespace __bulk_nested {
 using namespace stdexec;
 
-template <class _ReceiverId, integral _Shape, class _Fun> struct __receiver {
+template <class _ReceiverId, integral _Shape, std::size_t N, class _Fun>
+struct __receiver {
   using _Receiver = stdexec::__t<_ReceiverId>;
 
   class __t : receiver_adaptor<__t, _Receiver> {
     friend receiver_adaptor<__t, _Receiver>;
 
-    [[no_unique_address]] _Shape __shape_;
+    [[no_unique_address]] std::array<_Shape, N> __shape_;
     [[no_unique_address]] _Fun __f_;
 
     template <class... _As>
     void set_value(_As &&...__as) &&noexcept requires
         __nothrow_callable<_Fun, inline_scheduler, _Shape, _As &...> {
-      for (_Shape __i{}; __i != __shape_; ++__i) {
+      // TODO: Propagate nested dimensions to inline scheduler? Currently
+      // everything but the first dimension is dropped, but maybe it doesn't
+      // matter in the default implementation?
+      for (_Shape __i{}; __i != __shape_[0]; ++__i) {
         __f_(inline_scheduler{}, __i, __as...);
       }
       stdexec::set_value(std::move(this->base()), (_As &&) __as...);
@@ -45,7 +52,10 @@ template <class _ReceiverId, integral _Shape, class _Fun> struct __receiver {
     void set_value(_As &&...__as) &&noexcept requires
         __callable<_Fun, inline_scheduler, _Shape, _As &...> {
       try {
-        for (_Shape __i{}; __i != __shape_; ++__i) {
+        // TODO: Propagate nested dimensions to inline scheduler? Currently
+        // everything but the first dimension is dropped, but maybe it doesn't
+        // matter in the default implementation?
+        for (_Shape __i{}; __i != __shape_[0]; ++__i) {
           __f_(inline_scheduler{}, __i, __as...);
         }
         stdexec::set_value(std::move(this->base()), (_As &&) __as...);
@@ -57,7 +67,7 @@ template <class _ReceiverId, integral _Shape, class _Fun> struct __receiver {
   public:
     using __id = __receiver;
 
-    explicit __t(_Receiver __rcvr, _Shape __shape, _Fun __fun)
+    explicit __t(_Receiver __rcvr, std::array<_Shape, N> __shape, _Fun __fun)
         : receiver_adaptor<__t, _Receiver>((_Receiver &&) __rcvr),
           __shape_(__shape), __f_((_Fun &&) __fun) {}
   };
@@ -65,19 +75,20 @@ template <class _ReceiverId, integral _Shape, class _Fun> struct __receiver {
 
 template <class _Ty> using __decay_ref = __decay_t<_Ty> &;
 
-template <class _SenderId, integral _Shape, class _Fun> struct __sender {
+template <class _SenderId, integral _Shape, std::size_t N, class _Fun>
+struct __sender {
   using _Sender = stdexec::__t<_SenderId>;
 
   template <receiver _Receiver>
   using __receiver =
-      stdexec::__t<__receiver<stdexec::__id<_Receiver>, _Shape, _Fun>>;
+      stdexec::__t<__receiver<stdexec::__id<_Receiver>, _Shape, N, _Fun>>;
 
   struct __t {
     using __id = __sender;
     using is_sender = void;
 
     [[no_unique_address]] _Sender __sndr_;
-    [[no_unique_address]] _Shape __shape_;
+    [[no_unique_address]] std::array<_Shape, N> __shape_;
     [[no_unique_address]] _Fun __fun_;
 
     template <class _Sender, class _Env>
@@ -127,46 +138,54 @@ template <class _SenderId, integral _Shape, class _Fun> struct __sender {
 };
 
 struct bulk_nested_t {
-  template <sender _Sender, integral _Shape, class _Fun>
+  template <sender _Sender, integral _Shape, std::size_t N, class _Fun>
   using __sender =
-      __t<__sender<stdexec::__id<__decay_t<_Sender>>, _Shape, _Fun>>;
+      __t<__sender<stdexec::__id<__decay_t<_Sender>>, _Shape, N, _Fun>>;
 
-  template <sender _Sender, integral _Shape, __movable_value _Fun>
-  requires __tag_invocable_with_completion_scheduler<bulk_nested_t, set_value_t,
-                                                     _Sender, _Shape, _Fun>
-      sender auto operator()(_Sender &&__sndr, _Shape __shape, _Fun __fun) const
+  template <sender _Sender, integral _Shape, std::size_t N,
+            __movable_value _Fun>
+  requires __tag_invocable_with_completion_scheduler<
+      bulk_nested_t, set_value_t, _Sender, std::array<_Shape, N>, _Fun>
+      sender auto operator()(_Sender &&__sndr, std::array<_Shape, N> __shape,
+                             _Fun __fun) const
       noexcept(nothrow_tag_invocable<
                bulk_nested_t, __completion_scheduler_for<_Sender, set_value_t>,
-               _Sender, _Shape, _Fun>) {
+               _Sender, std::array<_Shape, N>, _Fun>) {
     auto __sched = get_completion_scheduler<set_value_t>(get_env(__sndr));
     return tag_invoke(bulk_nested_t{}, std::move(__sched), (_Sender &&) __sndr,
-                      (_Shape &&) __shape, (_Fun &&) __fun);
+                      __shape, (_Fun &&) __fun);
   }
 
-  template <sender _Sender, integral _Shape, __movable_value _Fun>
+  template <sender _Sender, integral _Shape, std::size_t N,
+            __movable_value _Fun>
   requires(!__tag_invocable_with_completion_scheduler<
-           bulk_nested_t, set_value_t, _Sender, _Shape, _Fun>) &&
-      tag_invocable<bulk_nested_t, _Sender, _Shape, _Fun> sender auto
-      operator()(_Sender &&__sndr, _Shape __shape, _Fun __fun) const
-      noexcept(nothrow_tag_invocable<bulk_nested_t, _Sender, _Shape, _Fun>) {
-    return tag_invoke(bulk_nested_t{}, (_Sender &&) __sndr, (_Shape &&) __shape,
+           bulk_nested_t, set_value_t, _Sender, std::array<_Shape, N>, _Fun>) &&
+      tag_invocable<bulk_nested_t, _Sender, std::array<_Shape, N>, _Fun> sender
+      auto
+      operator()(_Sender &&__sndr, std::array<_Shape, N> __shape,
+                 _Fun __fun) const
+      noexcept(nothrow_tag_invocable<bulk_nested_t, _Sender,
+                                     std::array<_Shape, N>, _Fun>) {
+    return tag_invoke(bulk_nested_t{}, (_Sender &&) __sndr, __shape,
                       (_Fun &&) __fun);
   }
 
-  template <sender _Sender, integral _Shape, __movable_value _Fun>
+  template <sender _Sender, integral _Shape, std::size_t N,
+            __movable_value _Fun>
   requires(!__tag_invocable_with_completion_scheduler<
-           bulk_nested_t, set_value_t, _Sender, _Shape, _Fun>) &&
-      (!tag_invocable<bulk_nested_t, _Sender, _Shape, _Fun>)
-          __sender<_Sender, _Shape, _Fun>
-          operator()(_Sender &&__sndr, _Shape __shape, _Fun __fun) const {
-    return __sender<_Sender, _Shape, _Fun>{(_Sender &&) __sndr, __shape,
-                                           (_Fun &&) __fun};
+           bulk_nested_t, set_value_t, _Sender, std::array<_Shape, N>, _Fun>) &&
+      (!tag_invocable<bulk_nested_t, _Sender, std::array<_Shape, N>, _Fun>)
+          __sender<_Sender, _Shape, N, _Fun>
+          operator()(_Sender &&__sndr, std::array<_Shape, N> __shape,
+                     _Fun __fun) const {
+    return __sender<_Sender, _Shape, N, _Fun>{(_Sender &&) __sndr, __shape,
+                                              (_Fun &&) __fun};
   }
 
-  template <integral _Shape, class _Fun>
-  __binder_back<bulk_nested_t, _Shape, _Fun> operator()(_Shape __shape,
-                                                        _Fun __fun) const {
-    return {{}, {}, {(_Shape &&) __shape, (_Fun &&) __fun}};
+  template <integral _Shape, std::size_t N, class _Fun>
+  __binder_back<bulk_nested_t, std::array<_Shape, N>, _Fun>
+  operator()(std::array<_Shape, N> __shape, _Fun __fun) const {
+    return {{}, {}, {__shape, (_Fun &&) __fun}};
   }
 };
 } // namespace __bulk_nested
