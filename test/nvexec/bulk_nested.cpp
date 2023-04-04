@@ -38,8 +38,9 @@ TEST_CASE("bulk_nested compiles with stream context",
       stdexec::sync_wait(
         stdexec::schedule(sch) |
         // TODO: Should this only be printed once per team? Separate algorithm?
-        // stdexec::once? stdexec::single? Currently it prints team_size times.
-        // How should values be forwarded from then? The pipeline must be
+        // stdexec::once? stdexec::single? Currently it prints once per team,
+        // but only because of the manual if. The if should be handled inside
+        // then.  How should values be forwarded from then? The pipeline must be
         // "active" for all threads, but the callable must be called on only
         // one. How should references, copies etc. be handled. All threads
         // should be referring to the same object.
