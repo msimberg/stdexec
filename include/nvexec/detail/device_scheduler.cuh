@@ -118,5 +118,27 @@ namespace nvexec::STDEXEC_STREAM_DETAIL_NS {
 
         return std::move(std::get<1>(__data));
       }
+
+      template <class Shape, class Fun>
+      struct bulk_fun {
+        Shape shape;
+        Fun fun;
+
+        template <class... Ts>
+        void operator()(int, Ts&... ts) {
+          for (int i = threadIdx.x; i < shape; i += blockDim.x) {
+            fun((Shape)i, ts...);
+          }
+        }
+      };
+
+      // We reuse the default bulk sender for its passthrough behaviour. We only
+      // do "one iteration" with it, leaving the actual index calculation and
+      // iteration to the wrapped for loop.
+      template <stdexec::sender S, std::integral Shape, class Fun>
+      friend stdexec::__bulk::bulk_t::__sender<S, Shape, bulk_fun<std::decay_t<Shape>, std::decay_t<Fun>>>
+      tag_invoke(stdexec::bulk_t, const device_scheduler& self, S&& sndr, Shape shape, Fun&& fun) {
+        return {(S&&) sndr, 1, bulk_fun<std::decay_t<Shape>, std::decay_t<Fun>>{shape, std::move(fun)}};
+      }
     };
 }

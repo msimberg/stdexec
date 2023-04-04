@@ -48,9 +48,7 @@ TEST_CASE("bulk_nested compiles with stream context",
         // times. If this level is using 4 CUDA threads, those 4 CUDA threads
         // will each loop at most 3 times to cover the iteration space of 9.
         stdexec::bulk(9, [=](int j) {
-          for (int j_actual = threadIdx.x; j_actual < 9; j_actual += blockDim.x) {
-            printf("hello from outer index %d, inner index %d with stream scheduler\n", i, j_actual);
-          }
+          printf("hello from outer index %d, inner index %d with stream scheduler\n", i, j);
         }) |
         // This should use the parallelism in the second level to print hello 9
         // times. If this level is using 4 CUDA threads, those 4 CUDA threads
