@@ -22,10 +22,10 @@
 
 namespace nvexec::STDEXEC_STREAM_DETAIL_NS {
 
-  namespace transfer {
+  namespace _transfer {
     template <class CvrefSenderId, class ReceiverId>
     struct operation_state_t {
-      using Sender = stdexec::__cvref_t<CvrefSenderId>;
+      using Sender = __cvref_t<CvrefSenderId>;
       using Receiver = stdexec::__t<ReceiverId>;
       using Env = typename operation_state_base_t<ReceiverId>::env_t;
 
@@ -36,16 +36,22 @@ namespace nvexec::STDEXEC_STREAM_DETAIL_NS {
         struct receiver_t {
           __t& op_state_;
 
-          template <
-            stdexec::__one_of<stdexec::set_value_t, stdexec::set_error_t, stdexec::set_stopped_t>
-              Tag,
-            class... As >
-          friend void tag_invoke(Tag tag, receiver_t&& self, As&&... as) noexcept {
-            Tag{}(std::move(self.op_state_.receiver_), (As&&) as...);
+          template <class... _Args>
+          void set_value(_Args&&... __args) noexcept {
+            stdexec::set_value(std::move(op_state_.rcvr_), static_cast<_Args&&>(__args)...);
           }
 
-          friend Env tag_invoke(stdexec::get_env_t, const receiver_t& self) {
-            return self.op_state_.make_env();
+          template <class _Error>
+          void set_error(_Error&& __err) noexcept {
+            stdexec::set_error(std::move(op_state_.rcvr_), static_cast<_Error&&>(__err));
+          }
+
+          void set_stopped() noexcept {
+            stdexec::set_stopped(std::move(op_state_.rcvr_));
+          }
+
+          auto get_env() const noexcept -> Env {
+            return op_state_.make_env();
           }
         };
 
@@ -54,33 +60,34 @@ namespace nvexec::STDEXEC_STREAM_DETAIL_NS {
         cudaError_t status_{cudaSuccess};
         context_state_t context_state_;
 
-        queue::host_ptr<variant_t> storage_;
+        host_ptr<variant_t> storage_;
         task_t* task_;
 
         ::cuda::std::atomic_flag started_{};
 
         using enqueue_receiver =
-          stdexec::__t<stream_enqueue_receiver<stdexec::__x<Env>, stdexec::__x<variant_t>>>;
-        using inner_op_state_t = stdexec::connect_result_t<Sender, enqueue_receiver>;
+          stdexec::__t<stream_enqueue_receiver<stdexec::__cvref_id<Env>, variant_t>>;
+        using inner_op_state_t = connect_result_t<Sender, enqueue_receiver>;
+        host_ptr<__decay_t<Env>> env_{};
         inner_op_state_t inner_op_;
 
-        friend void tag_invoke(stdexec::start_t, __t& op) noexcept {
-          op.started_.test_and_set(::cuda::std::memory_order::relaxed);
+        void start() & noexcept {
+          started_.test_and_set(::cuda::std::memory_order::relaxed);
 
-          if (op.status_ != cudaSuccess) {
+          if (status_ != cudaSuccess) {
             // Couldn't allocate memory for operation state, complete with error
-            stdexec::set_error(std::move(op.receiver_), std::move(op.status_));
+            stdexec::set_error(std::move(this->rcvr_), std::move(status_));
             return;
           }
 
-          stdexec::start(op.inner_op_);
+          stdexec::start(inner_op_);
         }
 
-        __t(Sender&& sender, Receiver&& receiver, context_state_t context_state)
-          : operation_state_base_t<ReceiverId>((Receiver&&) receiver, context_state, true)
+        __t(Sender&& sender, Receiver&& rcvr, context_state_t context_state)
+          : operation_state_base_t<ReceiverId>(static_cast<Receiver&&>(rcvr), context_state)
           , context_state_(context_state)
-          , storage_(queue::make_host<variant_t>(this->status_, context_state.pinned_resource_))
-          , task_(queue::make_host<task_t>(
+          , storage_(make_host<variant_t>(this->status_, context_state.pinned_resource_))
+          , task_(make_host<task_t>(
                     this->status_,
                     context_state.pinned_resource_,
                     receiver_t{*this},
@@ -88,13 +95,10 @@ namespace nvexec::STDEXEC_STREAM_DETAIL_NS {
                     this->get_stream(),
                     context_state.pinned_resource_)
                     .release())
-          , inner_op_{stdexec::connect(
-              (Sender&&) sender,
-              enqueue_receiver{
-                this->make_env(),
-                storage_.get(),
-                task_,
-                context_state_.hub_->producer()})} {
+          , env_(make_host(this->status_, context_state_.pinned_resource_, this->make_env()))
+          , inner_op_{connect(
+              static_cast<Sender&&>(sender),
+              enqueue_receiver{env_.get(), storage_.get(), task_, context_state_.hub_->producer()})} {
           if (this->status_ == cudaSuccess) {
             this->status_ = task_->status_;
           }
@@ -103,7 +107,7 @@ namespace nvexec::STDEXEC_STREAM_DETAIL_NS {
         STDEXEC_IMMOVABLE(__t);
       };
     };
-  }
+  } // namespace _transfer
 
   template <class SenderId>
   struct transfer_sender_t {
@@ -114,48 +118,55 @@ namespace nvexec::STDEXEC_STREAM_DETAIL_NS {
 
       template <class Self, class Receiver>
       using op_state_th = //
-        stdexec::__t<
-          transfer::operation_state_t< stdexec::__cvref_id<Self, Sender>, stdexec::__id<Receiver>>>;
+        stdexec::__t<_transfer::operation_state_t<__cvref_id<Self, Sender>, stdexec::__id<Receiver>>>;
 
       context_state_t context_state_;
       Sender sndr_;
 
-      template <class Self, class Env>
-      using completion_signatures = //
-        stdexec::make_completion_signatures<
-          stdexec::__copy_cvref_t<Self, Sender>,
-          Env,
-          stdexec::
-            completion_signatures< stdexec::set_stopped_t(), stdexec::set_error_t(cudaError_t) >>;
+      template <class... Ts>
+      using _set_value_t = completion_signatures<set_value_t(stdexec::__decay_t<Ts>...)>;
 
-      template <stdexec::__decays_to<__t> Self, stdexec::receiver Receiver>
-        requires stdexec::
-          receiver_of<Receiver, completion_signatures<Self, stdexec::env_of_t<Receiver>>>
-        friend auto tag_invoke(stdexec::connect_t, Self&& self, Receiver&& rcvr)
-          -> op_state_th<Self, Receiver> {
+      template <class Ty>
+      using _set_error_t = completion_signatures<set_error_t(stdexec::__decay_t<Ty>)>;
+
+      template <class Self, class Env>
+      using _completion_signatures_t = //
+        __try_make_completion_signatures<
+          __copy_cvref_t<Self, Sender>,
+          Env,
+          completion_signatures< //
+            set_stopped_t(),
+            set_error_t(cudaError_t)>,
+          __q<_set_value_t>,
+          __q<_set_error_t>>;
+
+      template <__decays_to<__t> Self, receiver Receiver>
+        requires receiver_of<Receiver, _completion_signatures_t<Self, env_of_t<Receiver>>>
+      STDEXEC_MEMFN_DECL(auto connect)(this Self&& self, Receiver rcvr) -> op_state_th<Self, Receiver> {
         return op_state_th<Self, Receiver>{
-          (Sender&&) self.sndr_, (Receiver&&) rcvr, self.context_state_};
+          static_cast<Sender&&>(self.sndr_), static_cast<Receiver&&>(rcvr), self.context_state_};
       }
 
-      template <stdexec::__decays_to<__t> Self, class Env>
-      friend auto tag_invoke(stdexec::get_completion_signatures_t, Self&&, Env)
-        -> stdexec::dependent_completion_signatures<Env>;
+      template <__decays_to<__t> Self, class Env>
+      static auto get_completion_signatures(Self&&, Env&&) -> _completion_signatures_t<Self, Env> {
+        return {};
+      }
 
-      template <stdexec::__decays_to<__t> Self, class Env>
-      friend auto tag_invoke(stdexec::get_completion_signatures_t, Self&&, Env)
-        -> completion_signatures<Self, Env>
-        requires true;
-
-      friend auto tag_invoke(stdexec::get_env_t, const __t& self) //
-        noexcept(stdexec::__nothrow_callable<stdexec::get_env_t, const Sender&>)
-          -> stdexec::__call_result_t<stdexec::get_env_t, const Sender&> {
-        return stdexec::get_env(self.sndr_);
+      auto get_env() const noexcept -> env_of_t<const Sender&> {
+        return stdexec::get_env(sndr_);
       }
 
       __t(context_state_t context_state, Sender sndr)
         : context_state_(context_state)
-        , sndr_{(Sender&&) sndr} {
+        , sndr_{static_cast<Sender&&>(sndr)} {
       }
     };
   };
-}
+} // namespace nvexec::STDEXEC_STREAM_DETAIL_NS
+
+namespace stdexec::__detail {
+  template <class SenderId>
+  inline constexpr __mconst<
+    nvexec::STDEXEC_STREAM_DETAIL_NS::transfer_sender_t<__name_of<__t<SenderId>>>>
+    __name_of_v<nvexec::STDEXEC_STREAM_DETAIL_NS::transfer_sender_t<SenderId>>{};
+} // namespace stdexec::__detail

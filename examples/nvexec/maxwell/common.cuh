@@ -23,14 +23,15 @@
 #include <iostream>
 #include <charconv>
 #include <string_view>
+#include <memory>
 #include <vector>
 #include <string.h>
 
 #include <math.h>
 
 #if defined(_NVHPC_CUDA) || defined(__CUDACC__)
-#define STDEXEC_STDERR
-#include "nvexec/detail/throw_on_cuda_error.cuh"
+#  define STDEXEC_STDERR
+#  include "nvexec/detail/throw_on_cuda_error.cuh"
 #endif
 
 struct deleter_t {
@@ -50,8 +51,8 @@ struct deleter_t {
 };
 
 template <class T>
-STDEXEC_DETAIL_CUDACC_HOST_DEVICE inline std::unique_ptr<T, deleter_t>
-  allocate_on(bool gpu, std::size_t elements = 1) {
+STDEXEC_ATTRIBUTE((host, device))
+inline std::unique_ptr<T, deleter_t> allocate_on(bool gpu, std::size_t elements = 1) {
   T *ptr{};
 
 #if defined(_NVHPC_CUDA) || defined(__CUDACC__)
@@ -89,9 +90,8 @@ struct fields_accessor {
 
   float *base_ptr;
 
-  [[nodiscard]] STDEXEC_DETAIL_CUDACC_HOST_DEVICE //
-    float *
-    get(field_id id) const {
+  STDEXEC_ATTRIBUTE((nodiscard, host, device))
+  float *get(field_id id) const {
     return base_ptr + static_cast<int>(id) * cells;
   }
 };
@@ -116,16 +116,16 @@ struct grid_t {
         static_cast<std::size_t>(cells) * static_cast<int>(field_id::fields_count))) {
   }
 
-  [[nodiscard]] fields_accessor accessor() const {
+  [[nodiscard]]
+  fields_accessor accessor() const {
     return {height / n, width / n, width, height, n, cells, fields_.get()};
   }
 };
 
 constexpr float C0 = 299792458.0f; // Speed of light [metres per second]
 
-STDEXEC_DETAIL_CUDACC_HOST_DEVICE  //
-  inline bool
-  is_circle_part(float x, float y, float object_x, float object_y, float object_size) {
+STDEXEC_ATTRIBUTE((host, device))
+inline bool is_circle_part(float x, float y, float object_x, float object_y, float object_size) {
   const float os2 = object_size * object_size;
   return ((x - object_x) * (x - object_x) + (y - object_y) * (y - object_y) <= os2);
 }
@@ -139,8 +139,8 @@ struct grid_initializer_t {
   float dt;
   fields_accessor accessor;
 
-  STDEXEC_DETAIL_CUDACC_HOST_DEVICE //
-    void
+  STDEXEC_ATTRIBUTE((host, device))
+  void
     operator()(std::size_t cell_id) const {
     const std::size_t row = cell_id / accessor.n;
     const std::size_t column = cell_id % accessor.n;
@@ -184,36 +184,32 @@ inline grid_initializer_t grid_initializer(float dt, fields_accessor accessor) {
   return {dt, accessor};
 }
 
-STDEXEC_DETAIL_CUDACC_HOST_DEVICE //
-  inline std::size_t
-  right_nid(std::size_t cell_id, std::size_t col, std::size_t N) {
+STDEXEC_ATTRIBUTE((host, device))
+inline std::size_t right_nid(std::size_t cell_id, std::size_t col, std::size_t N) {
   return col == N - 1 ? cell_id - (N - 1) : cell_id + 1;
 }
 
-STDEXEC_DETAIL_CUDACC_HOST_DEVICE //
-  inline std::size_t
-  left_nid(std::size_t cell_id, std::size_t col, std::size_t N) {
+STDEXEC_ATTRIBUTE((host, device))
+inline std::size_t left_nid(std::size_t cell_id, std::size_t col, std::size_t N) {
   return col == 0 ? cell_id + N - 1 : cell_id - 1;
 }
 
-STDEXEC_DETAIL_CUDACC_HOST_DEVICE //
-  inline std::size_t
-  bottom_nid(std::size_t cell_id, std::size_t row, std::size_t N) {
+STDEXEC_ATTRIBUTE((host, device))
+inline std::size_t bottom_nid(std::size_t cell_id, std::size_t row, std::size_t N) {
   return row == 0 ? cell_id + N * (N - 1) : cell_id - N;
 }
 
-STDEXEC_DETAIL_CUDACC_HOST_DEVICE //
-  inline std::size_t
-  top_nid(std::size_t cell_id, std::size_t row, std::size_t N) {
+STDEXEC_ATTRIBUTE((host, device))
+inline std::size_t top_nid(std::size_t cell_id, std::size_t row, std::size_t N) {
   return row == N - 1 ? cell_id - N * (N - 1) : cell_id + N;
 }
 
 struct h_field_calculator_t {
   fields_accessor accessor;
 
-  STDEXEC_DETAIL_CUDACC_HOST_DEVICE //
-    void
-    operator()(std::size_t cell_id) const __attribute__((always_inline)) {
+  STDEXEC_ATTRIBUTE((always_inline, host, device))
+  void
+    operator()(std::size_t cell_id) const {
     const std::size_t N = accessor.n;
     const std::size_t column = cell_id % N;
     const std::size_t row = cell_id / N;
@@ -239,23 +235,21 @@ struct e_field_calculator_t {
   fields_accessor accessor;
   std::size_t source_position;
 
-  [[nodiscard]] STDEXEC_DETAIL_CUDACC_HOST_DEVICE //
-    float
-    gaussian_pulse(float t, float t_0, float tau) const {
+  STDEXEC_ATTRIBUTE((nodiscard, host, device))
+  float gaussian_pulse(float t, float t_0, float tau) const {
     return exp(-(((t - t_0) / tau) * (t - t_0) / tau));
   }
 
-  [[nodiscard]] STDEXEC_DETAIL_CUDACC_HOST_DEVICE //
-    float
-    calculate_source(float t, float frequency) const {
+  STDEXEC_ATTRIBUTE((nodiscard, host, device))
+  float calculate_source(float t, float frequency) const {
     const float tau = 0.5f / frequency;
     const float t_0 = 6.0f * tau;
     return gaussian_pulse(t, t_0, tau);
   }
 
-  STDEXEC_DETAIL_CUDACC_HOST_DEVICE //
-    void
-    operator()(std::size_t cell_id) const __attribute__((always_inline)) {
+  STDEXEC_ATTRIBUTE((always_inline, host, device))
+  void
+    operator()(std::size_t cell_id) const {
     const std::size_t N = accessor.n;
     const std::size_t column = cell_id % N;
     const std::size_t row = cell_id / N;
@@ -389,7 +383,8 @@ class time_storage_t {
     : time_(allocate_on<float>(gpu)) {
   }
 
-  [[nodiscard]] float *get() const {
+  [[nodiscard]]
+  float *get() const {
     return time_.get();
   }
 };
@@ -445,7 +440,8 @@ std::pair<std::string_view, std::string_view> split(std::string_view str, char b
   return std::make_pair(str.substr(0, it), str.substr(it + 1, str.size() - it - 1));
 }
 
-[[nodiscard]] std::map<std::string_view, std::size_t> parse_cmd(int argc, char *argv[]) {
+[[nodiscard]]
+std::map<std::string_view, std::size_t> parse_cmd(int argc, char *argv[]) {
   std::map<std::string_view, std::size_t> params;
   const std::vector<std::string_view> args(argv + 1, argv + argc);
 
@@ -469,7 +465,8 @@ std::pair<std::string_view, std::string_view> split(std::string_view str, char b
   return params;
 }
 
-[[nodiscard]] std::size_t value(
+[[nodiscard]]
+std::size_t value(
   const std::map<std::string_view, std::size_t> &params,
   std::string_view name,
   std::size_t default_value = 0) {

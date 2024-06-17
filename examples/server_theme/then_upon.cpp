@@ -95,7 +95,7 @@ const char* as_string(obj_type t) {
 struct classification_result {
   obj_type type_;
   int accuracy_;
-  std::string details_;
+  std::string details_{};
 };
 
 struct image {
@@ -124,7 +124,7 @@ classification_result do_classify(image img) {
 }
 
 // Check for errors and transform them into classification result
-classification_result on_classification_error(std::exception_ptr ex) {
+classification_result on_classification_error(std::exception_ptr) {
   return {obj_type::general_error, 100, {}};
 }
 
@@ -193,13 +193,13 @@ int main() {
     ex::sender auto snd = handle_classify_request(req);
 
     // Pack this into a simplified flow and execute it asynchronously
-    ex::sender auto action =
-      std::move(snd) //
-      | ex::then([](http_response resp) {
-          std::ostringstream oss;
-          oss << "Sending response: " << resp.status_code_ << " / " << resp.body_ << "\n";
-          std::cout << oss.str();
-        });
+    ex::sender auto action = std::move(snd) //
+                           | ex::then([](http_response resp) {
+                               std::ostringstream oss;
+                               oss << "Sending response: " << resp.status_code_ << " / "
+                                   << resp.body_ << "\n";
+                               std::cout << oss.str();
+                             });
     scope.spawn(ex::on(sched, std::move(action)));
   }
 

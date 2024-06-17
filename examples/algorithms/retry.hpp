@@ -36,11 +36,11 @@ struct _conv {
   F f_;
 
   explicit _conv(F f) noexcept
-    : f_((F&&) f) {
+    : f_(static_cast<F&&>(f)) {
   }
 
   operator std::invoke_result_t<F>() && {
-    return ((F&&) f_)();
+    return static_cast<F&&>(f_)();
   }
 };
 
@@ -53,7 +53,7 @@ struct _retry_receiver : stdexec::receiver_adaptor<_retry_receiver<S, R>> {
   _op<S, R>* o_;
 
   R&& base() && noexcept {
-    return (R&&) o_->r_;
+    return static_cast<R&&>(o_->r_);
   }
 
   const R& base() const & noexcept {
@@ -76,11 +76,11 @@ template <class S, class R>
 struct _op {
   S s_;
   R r_;
-  std::optional< stdexec::connect_result_t<S&, _retry_receiver<S, R>>> o_;
+  std::optional<stdexec::connect_result_t<S&, _retry_receiver<S, R>>> o_;
 
   _op(S s, R r)
-    : s_((S&&) s)
-    , r_((R&&) r)
+    : s_(static_cast<S&&>(s))
+    , r_(static_cast<R&&>(r))
     , o_{_connect()} {
   }
 
@@ -97,7 +97,7 @@ struct _op {
       o_.emplace(_connect()); // potentially throwing
       stdexec::start(*o_);
     } catch (...) {
-      stdexec::set_error((R&&) r_, std::current_exception());
+      stdexec::set_error(static_cast<R&&>(r_), std::current_exception());
     }
   }
 
@@ -108,11 +108,11 @@ struct _op {
 
 template <class S>
 struct _retry_sender {
-  using is_sender = void;
+  using sender_concept = stdexec::sender_t;
   S s_;
 
   explicit _retry_sender(S s)
-    : s_((S&&) s) {
+    : s_(static_cast<S&&>(s)) {
   }
 
   template <class>
@@ -121,26 +121,26 @@ struct _retry_sender {
   using _value = stdexec::completion_signatures<stdexec::set_value_t(Ts...)>;
 
   template <class Env>
-  friend auto tag_invoke(stdexec::get_completion_signatures_t, const _retry_sender&, Env)
-    -> stdexec::make_completion_signatures<
-      S&,
-      Env,
-      stdexec::completion_signatures<stdexec::set_error_t(std::exception_ptr)>,
-      _value,
-      _error>;
-
-  template <stdexec::receiver R>
-  friend _op<S, R> tag_invoke(stdexec::connect_t, _retry_sender&& self, R r) {
-    return {(S&&) self.s_, (R&&) r};
+  auto get_completion_signatures(Env&&) const -> stdexec::transform_completion_signatures_of<
+    S&,
+    Env,
+    stdexec::completion_signatures<stdexec::set_error_t(std::exception_ptr)>,
+    _value,
+    _error> {
+    return {};
   }
 
-  friend auto tag_invoke(stdexec::get_env_t, const _retry_sender& self) //
-    noexcept(noexcept(stdexec::get_env(self.s_))) -> std::invoke_result_t<stdexec::get_env_t, S> {
-    return stdexec::get_env(self.s_);
+  template <stdexec::receiver R>
+  friend auto tag_invoke(stdexec::connect_t, _retry_sender&& self, R r) -> _op<S, R> {
+    return {static_cast<S&&>(self.s_), static_cast<R&&>(r)};
+  }
+
+  auto get_env() const noexcept -> stdexec::env_of_t<S> {
+    return stdexec::get_env(s_);
   }
 };
 
 template <stdexec::sender S>
 stdexec::sender auto retry(S s) {
-  return _retry_sender{(S&&) s};
+  return _retry_sender{static_cast<S&&>(s)};
 }

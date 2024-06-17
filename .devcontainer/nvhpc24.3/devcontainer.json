@@ -1,17 +1,20 @@
 {
-  "image": "rapidsai/devcontainers:23.04-cpp-llvm16-cuda12.0-nvhpc23.1-ubuntu22.04",
+  "image": "rapidsai/devcontainers:24.04-cpp-nvhpc24.3-ubuntu22.04",
 
-  "hostRequirements": { "gpu": true },
+  "hostRequirements": { "gpu": "optional" },
 
   "initializeCommand": ["/bin/bash", "-c", "mkdir -p .cache/.{aws,config}"],
 
   "containerEnv": {
     "SCCACHE_REGION": "us-east-2",
     "SCCACHE_BUCKET": "rapids-sccache-devs",
+    "SCCACHE_S3_KEY_PREFIX": "nvidia-stdexec-dev",
     "VAULT_HOST": "https://vault.ops.k8s.rapids.ai",
     "HISTFILE": "${containerWorkspaceFolder}/.cache/._bash_history"
   },
 
+  "workspaceFolder": "/home/coder/stdexec",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/home/coder/stdexec,type=bind,consistency=consistent",
   "mounts": [
     "source=${localWorkspaceFolder}/.cache/.aws,target=/home/coder/.aws,type=bind,consistency=consistent",
     "source=${localWorkspaceFolder}/.cache/.config,target=/home/coder/.config,type=bind,consistency=consistent"
@@ -20,7 +23,8 @@
   "customizations": {
     "vscode": {
       "extensions": [
-        "augustocdias.tasks-shell-input"
+        "augustocdias.tasks-shell-input",
+        "ericniebler.erics-build-output-colorizer"
       ],
       "settings": {
         "debug.toolBarLocation": "docked",

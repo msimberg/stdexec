@@ -17,6 +17,7 @@
 #pragma once
 
 #include "../stdexec/execution.hpp"
+#include "../stdexec/stop_token.hpp"
 
 #include <cstddef>
 #include <type_traits>
@@ -69,19 +70,18 @@ namespace exec {
           __execute_(this);
         }
 
-        friend void tag_invoke(start_t, __operation_base& __self) noexcept {
+        void start() & noexcept {
           auto* __current_state = __trampoline_state<__operation_base>::__current_;
           if (__current_state == nullptr) {
             __trampoline_state<__operation_base> __state;
-            __self.__execute();
+            __execute();
             __state.__drain();
-          } else if (__current_state->__recursion_depth_ < __self.__max_recursion_depth_) {
+          } else if (__current_state->__recursion_depth_ < __max_recursion_depth_) {
             ++__current_state->__recursion_depth_;
-            __self.__execute();
+            __execute();
           } else {
             // Exceeded recursion limit.
-            __self.__next_ = std::exchange(
-              __current_state->__head_, static_cast<__operation_base*>(&__self));
+            __next_ = std::exchange(__current_state->__head_, static_cast<__operation_base*>(this));
           }
         }
 
@@ -96,17 +96,18 @@ namespace exec {
 
         struct __t : __operation_base {
           using __id = __operation;
-          [[no_unique_address]] _Receiver __receiver_;
+          STDEXEC_ATTRIBUTE((no_unique_address))
+          _Receiver __receiver_;
 
-          explicit __t(_Receiver __rcvr, std::size_t __max_depth) noexcept(
-            __nothrow_decay_copyable<_Receiver>)
+          explicit __t(_Receiver __rcvr, std::size_t __max_depth) //
+            noexcept(__nothrow_decay_copyable<_Receiver>)
             : __operation_base(&__t::__execute_impl, __max_depth)
-            , __receiver_((_Receiver&&) __rcvr) {
+            , __receiver_(static_cast<_Receiver&&>(__rcvr)) {
           }
 
           static void __execute_impl(__operation_base* __op) noexcept {
             auto& __self = *static_cast<__t*>(__op);
-            if (std::unstoppable_token<stop_token_of_t<env_of_t<_Receiver&>>>) {
+            if (stdexec::unstoppable_token<stop_token_of_t<env_of_t<_Receiver&>>>) {
               stdexec::set_value(static_cast<_Receiver&&>(__self.__receiver_));
             } else {
               if (get_stop_token(get_env(__self.__receiver_)).stop_requested()) {
@@ -126,7 +127,7 @@ namespace exec {
       using __operation_t = stdexec::__t<__operation<__id<__decay_t<_Receiver>>>>;
 
       struct __schedule_sender {
-        using is_sender = void;
+        using sender_concept = stdexec::sender_t;
         using completion_signatures =
           stdexec::completion_signatures<set_value_t(), set_stopped_t()>;
 
@@ -135,36 +136,36 @@ namespace exec {
         }
 
         template <receiver_of<completion_signatures> _Receiver>
-        __operation_t<_Receiver> __make_operation(_Receiver __rcvr) const
-          noexcept(__nothrow_decay_copyable<_Receiver>) {
-          return __operation_t<_Receiver>{(_Receiver&&) __rcvr, __max_recursion_depth_};
+        auto __make_operation(_Receiver __rcvr) const noexcept(__nothrow_decay_copyable<_Receiver>)
+          -> __operation_t<_Receiver> {
+          return __operation_t<_Receiver>{static_cast<_Receiver&&>(__rcvr), __max_recursion_depth_};
         }
 
         template <receiver_of<completion_signatures> _Receiver>
-        friend auto tag_invoke(connect_t, __schedule_sender __self, _Receiver __rcvr) noexcept(
-          __nothrow_decay_copyable<_Receiver>) -> __operation_t<_Receiver> {
-          return __self.__make_operation((_Receiver&&) __rcvr);
+        STDEXEC_MEMFN_DECL(auto connect)(this __schedule_sender __self, _Receiver __rcvr) //
+          noexcept(__nothrow_decay_copyable<_Receiver>) -> __operation_t<_Receiver> {
+          return __self.__make_operation(static_cast<_Receiver&&>(__rcvr));
         }
 
-        friend __scheduler
-          tag_invoke(get_completion_scheduler_t<set_value_t>, __schedule_sender __self) noexcept {
+        STDEXEC_MEMFN_DECL(auto
+          query)(this __schedule_sender __self, get_completion_scheduler_t<set_value_t>) noexcept
+          -> __scheduler {
           return __scheduler{__self.__max_recursion_depth_};
         }
 
-        friend const __schedule_sender&
-          tag_invoke(get_env_t, const __schedule_sender& __self) noexcept {
-          return __self;
+        auto get_env() const noexcept -> const __schedule_sender& {
+          return *this;
         }
 
         std::size_t __max_recursion_depth_;
       };
 
-      friend __schedule_sender tag_invoke(schedule_t, __scheduler __self) noexcept {
-        return __schedule_sender{__self.__max_recursion_depth_};
+     public:
+      auto schedule() const noexcept -> __schedule_sender {
+        return __schedule_sender{__max_recursion_depth_};
       }
 
-     public:
-      bool operator==(const __scheduler&) const noexcept = default;
+      auto operator==(const __scheduler&) const noexcept -> bool = default;
     };
 
     template <class _Operation>

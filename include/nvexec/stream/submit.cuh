@@ -20,7 +20,7 @@
 
 #include "common.cuh"
 
-namespace nvexec::STDEXEC_STREAM_DETAIL_NS::submit {
+namespace nvexec::STDEXEC_STREAM_DETAIL_NS::_submit {
 
   template <class SenderId, class ReceiverId>
   struct op_state_t {
@@ -30,42 +30,51 @@ namespace nvexec::STDEXEC_STREAM_DETAIL_NS::submit {
     struct receiver_t : stream_receiver_base {
       op_state_t* op_state_;
 
-      template <
-        stdexec::__one_of<stdexec::set_value_t, stdexec::set_error_t, stdexec::set_stopped_t> Tag,
-        class... As>
-        requires stdexec::__callable<Tag, Receiver, As...>
-      friend void tag_invoke(Tag tag, receiver_t&& self, As&&... as) //
-        noexcept(stdexec::__nothrow_callable<Tag, Receiver, As...>) {
+      template <class... As>
+        requires __callable<set_value_t, Receiver, As...>
+      void set_value(As&&... as) noexcept {
         // Delete the state as cleanup:
-        std::unique_ptr<op_state_t> g{self.op_state_};
-        return tag((Receiver&&) self.op_state_->rcvr_, (As&&) as...);
+        std::unique_ptr<op_state_t> g{op_state_};
+        stdexec::set_value(static_cast<Receiver&&>(op_state_->rcvr_), static_cast<As&&>(as)...);
+      }
+
+      template <class Error>
+        requires __callable<set_error_t, Receiver, Error>
+      void set_error(Error&& err) noexcept {
+        // Delete the state as cleanup:
+        std::unique_ptr<op_state_t> g{op_state_};
+        stdexec::set_error(static_cast<Receiver&&>(op_state_->rcvr_), static_cast<Error&&>(err));
+      }
+
+      void set_stopped() noexcept requires __callable<set_stopped_t, Receiver> {
+        // Delete the state as cleanup:
+        std::unique_ptr<op_state_t> g{op_state_};
+        stdexec::set_stopped(static_cast<Receiver&&>(op_state_->rcvr_));
       }
 
       // Forward all receiever queries.
-      friend auto tag_invoke(stdexec::get_env_t, const receiver_t& self)
-        -> stdexec::env_of_t<Receiver> {
-        return stdexec::get_env((const Receiver&) self.op_state_->rcvr_);
+      auto get_env() const noexcept -> env_of_t<Receiver> {
+        return stdexec::get_env(op_state_->rcvr_);
       }
     };
 
     Receiver rcvr_;
-    stdexec::connect_result_t<Sender, receiver_t> op_state_;
+    connect_result_t<Sender, receiver_t> op_state_;
 
-    template <stdexec::__decays_to<Receiver> CvrefReceiver>
+    template <__decays_to<Receiver> CvrefReceiver>
     op_state_t(Sender&& sndr, CvrefReceiver&& rcvr)
-      : rcvr_((CvrefReceiver&&) rcvr)
-      , op_state_(stdexec::connect((Sender&&) sndr, receiver_t{{}, this})) {
+      : rcvr_(static_cast<CvrefReceiver&&>(rcvr))
+      , op_state_(connect(static_cast<Sender&&>(sndr), receiver_t{{}, this})) {
     }
   };
 
   struct submit_t {
-    template <stdexec::receiver Receiver, stdexec::sender_to<Receiver> Sender>
+    template <receiver Receiver, sender_to<Receiver> Sender>
     void operator()(Sender&& sndr, Receiver&& rcvr) const noexcept(false) {
-      stdexec::start(
-        (new op_state_t<stdexec::__id<Sender>, stdexec::__id<stdexec::__decay_t<Receiver>>>{
-           (Sender&&) sndr, (Receiver&&) rcvr})
-          ->op_state_);
+      start((new op_state_t<stdexec::__id<Sender>, stdexec::__id<__decay_t<Receiver>>>{
+               static_cast<Sender&&>(sndr), static_cast<Receiver&&>(rcvr)})
+              ->op_state_);
     }
   };
 
-}
+} // namespace nvexec::STDEXEC_STREAM_DETAIL_NS::_submit

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2023 Maikel Nadolski
- * Copyright (c) 2021-2023 NVIDIA Corporation
+ * Copyright (c) 2021-2024 NVIDIA Corporation
  *
  * Licensed under the Apache License Version 2.0 with LLVM Exceptions
  * (the "License"); you may not use this file except in compliance with
@@ -25,23 +25,24 @@ namespace exec {
   namespace __variant {
     using namespace stdexec;
 
-    template <class _ReceiverId, class... _SenderIds>
+    template <class _ReceiverId, class... _CvrefSenderIds>
     struct __operation_state {
       class __t {
-        std::variant<connect_result_t<stdexec::__t<_SenderIds>, stdexec::__t<_ReceiverId>>...>
+        std::variant<connect_result_t<__cvref_t<_CvrefSenderIds>, stdexec::__t<_ReceiverId>>...>
           __variant_;
-
-        friend void tag_invoke(start_t, __t& __self) noexcept {
-          std::visit([](auto& __s) { start(__s); }, __self.__variant_);
-        }
 
        public:
         template <class _Sender, class _Receiver>
-        __t(_Sender&& __sender, _Receiver&& __receiver) noexcept(
-          __nothrow_connectable<_Sender, _Receiver>)
+        __t(_Sender&& __sender, _Receiver&& __receiver) //
+          noexcept(__nothrow_connectable<_Sender, _Receiver>)
           : __variant_{std::in_place_type<connect_result_t<_Sender, _Receiver>>, __conv{[&] {
-                         return connect((_Sender&&) __sender, (_Receiver&&) __receiver);
+                         return stdexec::connect(
+                           static_cast<_Sender&&>(__sender), static_cast<_Receiver&&>(__receiver));
                        }}} {
+        }
+
+        void start() & noexcept {
+          std::visit([](auto& __s) { stdexec::start(__s); }, __variant_);
         }
       };
     };
@@ -49,50 +50,88 @@ namespace exec {
     template <class... _SenderIds>
     struct __sender {
       template <class _Self, class _Env>
-      using __completion_signatures_t = __concat_completion_signatures_t<
-        completion_signatures_of_t<__copy_cvref_t<_Self, stdexec::__t<_SenderIds>>, _Env>...>;
+      using __completion_signatures_t = //
+        __mtry_q<stdexec::__concat_completion_signatures>::__f<
+          __completion_signatures_of_t<__copy_cvref_t<_Self, stdexec::__t<_SenderIds>>, _Env>...>;
 
       template <class _Self, class _Receiver>
       struct __visitor {
-        _Receiver __r;
+        _Receiver __rcvr;
 
-        template <class _S>
-        stdexec::__t< __operation_state<__id<_Receiver>, __copy_cvref_t<_Self, _SenderIds>...>>
-          operator()(_S&& __s) const {
-          return {(_S&&) __s, (_Receiver&&) __r};
+        template <class _Sender>
+        auto operator()(_Sender&& __s) //
+          -> stdexec::__t<__operation_state<__id<_Receiver>, __copy_cvref_t<_Self, _SenderIds>...>> {
+          return {static_cast<_Sender&&>(__s), static_cast<_Receiver&&>(__rcvr)};
         }
       };
 
-      class __t {
-        std::variant<stdexec::__t<_SenderIds>...> __variant_;
+      class __t : private std::variant<stdexec::__t<_SenderIds>...> {
+        using __variant_t = std::variant<stdexec::__t<_SenderIds>...>;
 
-        template <__decays_to<__t> _Self, class _Receiver>
+        auto base() && noexcept -> __variant_t&& {
+          return std::move(*this);
+        }
+
+        auto base() & noexcept -> __variant_t& {
+          return *this;
+        }
+
+        auto base() const & noexcept -> const __variant_t& {
+          return *this;
+        }
+
+       public:
+        using sender_concept = stdexec::sender_t;
+        using __id = __sender;
+
+        __t() = default;
+
+        template <class _Sender>
+          requires __one_of<__decay_t<_Sender>, stdexec::__t<_SenderIds>...>
+        __t(_Sender&& __sender) //
+          noexcept(__nothrow_constructible_from<std::variant<stdexec::__t<_SenderIds>...>, _Sender>)
+          : __variant_t{static_cast<_Sender&&>(__sender)} {
+        }
+
+        using __variant_t::operator=;
+        using __variant_t::index;
+        using __variant_t::emplace;
+        using __variant_t::swap;
+
+        template <__decays_to<__t> _Self, receiver _Receiver>
           requires(sender_to<__copy_cvref_t<_Self, stdexec::__t<_SenderIds>>, _Receiver> && ...)
-        friend stdexec::__t<
-          __operation_state<__id<_Receiver>, __copy_cvref_t<_Self, _SenderIds>...>>
-          tag_invoke(connect_t, _Self&& __self, _Receiver&& __r) noexcept(
-            (__nothrow_connectable<__copy_cvref_t<_Self, stdexec::__t<_SenderIds>>, _Receiver>
-             && ...)) {
+        STDEXEC_MEMFN_DECL(auto connect)(this _Self&& __self, _Receiver __rcvr) noexcept((
+          __nothrow_connectable<__copy_cvref_t<_Self, stdexec::__t<_SenderIds>>, _Receiver> && ...))
+          -> stdexec::__t<__operation_state<
+            stdexec::__id<_Receiver>,
+            __cvref_id<_Self, stdexec::__t<_SenderIds>>...>> {
           return std::visit(
-            __visitor<_Self, _Receiver>{(_Receiver&&) __r}, ((_Self&&) __self).__variant_);
+            __visitor<_Self, _Receiver>{static_cast<_Receiver&&>(__rcvr)},
+            static_cast<_Self&&>(__self).base());
         }
 
         template <__decays_to<__t> _Self, class _Env>
-        friend auto tag_invoke(get_completion_signatures_t, _Self&&, _Env)
-          -> __completion_signatures_t<_Self, _Env>;
-
-       public:
-        template <class _Sender>
-          requires __one_of<__decay_t<_Sender>, stdexec::__t<_SenderIds>...>
-        __t(_Sender&& __sender) noexcept(
-          std::is_nothrow_constructible_v<std::variant<stdexec::__t<_SenderIds>...>, _Sender>)
-          : __variant_{(_Sender&&) __sender} {
+        static auto
+          get_completion_signatures(_Self&&, _Env&&) -> __completion_signatures_t<_Self, _Env> {
+          return {};
         }
       };
     };
-  }
+  } // namespace __variant
 
   template <class... _Senders>
   using variant_sender =
     stdexec::__t<__variant::__sender<stdexec::__id<stdexec::__decay_t<_Senders>>...>>;
-}
+} // namespace exec
+
+namespace stdexec::__detail {
+  struct __variant_sender_name {
+    template <class _Sender>
+    using __f = __mapply<
+      __transform<__mcompose<__q<__name_of>, __q<__t>>, __q<exec::__variant::__sender>>,
+      _Sender>;
+  }; // namespace stdexec::__detail
+
+  template <class... _SenderIds>
+  extern __variant_sender_name __name_of_v<exec::__variant::__sender<_SenderIds...>>;
+} // namespace stdexec::__detail

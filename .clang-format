@@ -6,8 +6,11 @@ AlignArrayOfStructures: Right
 AlignConsecutiveAssignments: None
 AlignConsecutiveBitFields: None
 AlignConsecutiveDeclarations: None
-AlignConsecutiveMacros: None
-AlignEscapedNewlines: DontAlign
+AlignConsecutiveMacros:
+  Enabled: true
+  AcrossEmptyLines: true
+  AcrossComments: true
+AlignEscapedNewlines: Right
 AlignOperands: AlignAfterOperator
 AlignTrailingComments: true
 AllowAllArgumentsOnNextLine: true
@@ -23,10 +26,13 @@ AlwaysBreakAfterDefinitionReturnType: None
 AlwaysBreakAfterReturnType: None
 AlwaysBreakBeforeMultilineStrings: true
 AlwaysBreakTemplateDeclarations: Yes
-AttributeMacros: ['STDEXEC_DETAIL_CUDACC_HOST_DEVICE']
+AttributeMacros: [
+  'STDEXEC_SYSTEM_CONTEXT_INLINE'
+]
 BinPackArguments: false
 BinPackParameters: false
 BitFieldColonSpacing: Both
+BreakAfterAttributes: Always
 BreakBeforeBraces: Custom
 BraceWrapping:
   AfterCaseLabel: false
@@ -47,7 +53,6 @@ BraceWrapping:
   SplitEmptyFunction: false
   SplitEmptyRecord: false
   SplitEmptyNamespace: false
-BreakAfterJavaFieldAnnotations: true
 BreakBeforeBinaryOperators: NonAssignment
 BreakBeforeConceptDeclarations: true
 BreakBeforeTernaryOperators: true
@@ -59,38 +64,47 @@ CompactNamespaces: true
 ConstructorInitializerIndentWidth: 2
 ContinuationIndentWidth: 2
 Cpp11BracedListStyle: true
-DeriveLineEnding: true
 DerivePointerAlignment: true
 EmptyLineAfterAccessModifier: Never
 EmptyLineBeforeAccessModifier: Leave
 ExperimentalAutoDetectBinPacking: true
-FixNamespaceComments: false
+FixNamespaceComments: true
 IncludeBlocks: Preserve
 IndentAccessModifiers: false
 IndentCaseBlocks: false
 IndentCaseLabels: false
 IndentExternBlock: AfterExternBlock
 IndentGotoLabels: false
-IndentPPDirectives: None
-IndentRequires: false
+IndentPPDirectives: AfterHash
 IndentWidth: 2
 IndentWrappedFunctionNames: true
 InsertTrailingCommas: None
 KeepEmptyLinesAtTheStartOfBlocks: true
 LambdaBodyIndentation: Signature
+LineEnding: LF
+Macros: [
+  'STDEXEC_MEMFN_DECL(X)=X',
+  'STDEXEC_MEMFN_DECL(X,Y)=X,Y',
+  'STDEXEC_MEMFN_DECL(X,Y,Z)=X,Y,Z',
+  'STDEXEC_ATTRIBUTE(X)=__attribute__(X) //',
+  'STDEXEC_NO_UNIQUE_ADDRESS=[[no_unique_address]]',
+  'STDEXEC_IMMOVABLE_NO_UNIQUE_ADDRESS=[[no_unique_address]]',
+  'STDEXEC_MISSING_MEMBER(X,Y)=true',
+  'STDEXEC_DEFINE_MEMBER(X)=void foo() {}'
+]
 MaxEmptyLinesToKeep: 2
 NamespaceIndentation: All
 PackConstructorInitializers: Never
-PenaltyBreakAssignment: 64
+PenaltyBreakAssignment: 10
 PenaltyBreakBeforeFirstCallParameter: 64
-PenaltyBreakComment: 512
-PenaltyBreakFirstLessLess: 64
-PenaltyBreakOpenParenthesis: 32
-PenaltyBreakString: 64
-PenaltyBreakTemplateDeclaration: 4
-PenaltyExcessCharacter: 256
-PenaltyIndentedWhitespace: 2
-PenaltyReturnTypeOnItsOwnLine: 4
+PenaltyBreakComment: 0
+PenaltyBreakFirstLessLess: 0
+PenaltyBreakOpenParenthesis: 80
+PenaltyBreakString: 10
+PenaltyBreakTemplateDeclaration: 0
+PenaltyExcessCharacter: 100
+PenaltyIndentedWhitespace: 0
+PenaltyReturnTypeOnItsOwnLine: 0
 PointerAlignment: Left
 QualifierAlignment: Leave
 ReferenceAlignment: Pointer
@@ -127,12 +141,12 @@ SpaceBeforeSquareBrackets: false
 SpaceInEmptyBlock: true
 SpaceInEmptyParentheses: false
 SpacesBeforeTrailingComments: 1
-SpacesInAngles: Leave
+SpacesInAngles: Never
 SpacesInCStyleCastParentheses: false
 SpacesInConditionalStatement: false
 SpacesInContainerLiterals: true
 SpacesInParentheses: false
 Standard: c++20
 TabWidth: 0
-UseCRLF: true
+TypenameMacros: []
 UseTab: Never

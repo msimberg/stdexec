@@ -16,10 +16,13 @@
 #pragma once
 
 #if __has_include(<unistd.h>) && __has_include(<sys/wait.h>)
-#include <unistd.h>
-#include <sys/wait.h>
-#define REQUIRE_TERMINATE __require_terminate
+#  include <unistd.h>
+#  include <sys/wait.h>
+#  define REQUIRE_TERMINATE __require_terminate
 #endif
+
+#include <cstdlib>
+#include <exception>
 
 #include <catch2/catch.hpp>
 
@@ -39,7 +42,7 @@ namespace {
         // call the function that we expect to abort
         std::set_terminate([] { std::exit(EXIT_FAILURE); });
 
-        std::invoke((F&&) f, (Args&&) args...);
+        std::invoke(static_cast<F&&>(f), static_cast<Args&&>(args)...);
 
         // if the function didn't abort, we'll exit cleanly
         std::exit(EXIT_SUCCESS);

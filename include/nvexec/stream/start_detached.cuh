@@ -20,23 +20,21 @@
 
 #include "common.cuh"
 
-namespace nvexec::STDEXEC_STREAM_DETAIL_NS::start_detached {
+namespace nvexec::STDEXEC_STREAM_DETAIL_NS::_start_detached {
 
   struct detached_receiver_t : stream_receiver_base {
-    friend void tag_invoke(stdexec::set_value_t, detached_receiver_t&&, auto&&...) noexcept {
+    template <class... _Args>
+    void set_value(_Args&&...) noexcept {
     }
 
-    [[noreturn]] friend void
-      tag_invoke(stdexec::set_error_t, detached_receiver_t&&, auto&&) noexcept {
+    template <class _Error>
+    [[noreturn]]
+    void set_error(_Error&&) noexcept {
       std::terminate();
     }
 
-    friend void tag_invoke(stdexec::set_stopped_t, detached_receiver_t&&) noexcept {
-    }
-
-    friend stdexec::empty_env tag_invoke(stdexec::get_env_t, const detached_receiver_t&) noexcept {
-      return {};
+    void set_stopped() noexcept {
     }
   };
 
-}
+} // namespace nvexec::STDEXEC_STREAM_DETAIL_NS::_start_detached
