@@ -49,7 +49,6 @@ namespace stdexec {
       STDEXEC_ATTRIBUTE((host, device))
       void
         visit(_Fn &&, _Us &&...) const noexcept {
-        STDEXEC_ASSERT(false);
       }
 
       STDEXEC_ATTRIBUTE((host, device))

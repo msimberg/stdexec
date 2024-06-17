@@ -34,12 +34,14 @@
 #include "__tuple.hpp"
 #include "__type_traits.hpp"
 #include "__utility.hpp"
-#include "__variant.hpp"
 
 #include "../stop_token.hpp"
 
 #include <atomic>
 #include <exception>
+#include <optional>
+#include <tuple>
+#include <variant>
 
 namespace stdexec {
   /////////////////////////////////////////////////////////////////////////////
@@ -136,10 +138,21 @@ namespace stdexec {
           completion_signatures<>,
           __concat_completion_signatures>...>;
 
+    struct __not_an_error { };
+
+    struct __tie_fn {
+      template <class... _Ty>
+      auto operator()(_Ty&... __vals) noexcept -> std::tuple<_Ty&...> {
+        return std::tuple<_Ty&...>{__vals...};
+      }
+    };
+
     template <class _Tag, class _Receiver>
     auto __complete_fn(_Tag, _Receiver& __rcvr) noexcept {
       return [&]<class... _Ts>(_Ts&... __ts) noexcept {
-        _Tag()(static_cast<_Receiver&&>(__rcvr), static_cast<_Ts&&>(__ts)...);
+        if constexpr (!__same_as<__types<_Ts...>, __types<__not_an_error>>) {
+          _Tag()(static_cast<_Receiver&&>(__rcvr), static_cast<_Ts&&>(__ts)...);
+        }
       };
     }
 
@@ -166,18 +179,18 @@ namespace stdexec {
             __ignore>,
           _Senders...>;
 
-      using __collect_errors = __mbind_front_q<__mset_insert, __mset<>>;
+      using __nullable_variant_t_ = __munique<__mbind_front_q<std::variant, __not_an_error>>;
 
-      using __errors_list = //
+      using __error_types = //
         __minvoke<
-          __mconcat<>,
-          __if<
-            __all_nothrow_decay_copyable_results<_Env, _Senders...>,
-            __types<>,
-            __types<std::exception_ptr>>,
-          __error_types_of_t<_Senders, __env_t<_Env>, __q<__types>>...>;
+          __mconcat<__transform<__q<__decay_t>, __nullable_variant_t_>>,
+          error_types_of_t<_Senders, __env_t<_Env>, __types>...>;
 
-      using __errors_variant = __mapply<__q<__uniqued_variant_for>, __errors_list>;
+      using __errors_variant = //
+        __if<
+          __all_nothrow_decay_copyable_results<_Env, _Senders...>,
+          __error_types,
+          __minvoke<__push_back_unique<__q<std::variant>>, __error_types, std::exception_ptr>>;
     };
 
     struct _INVALID_ARGUMENTS_TO_WHEN_ALL_ { };
@@ -206,9 +219,9 @@ namespace stdexec {
           }
           break;
         case __error:
-          if constexpr (!__same_as<_ErrorsVariant, __variant_for<>>) {
+          if constexpr (!__same_as<_ErrorsVariant, std::variant<std::monostate>>) {
             // One or more child operations completed with an error:
-            __errors_.visit(__complete_fn(set_error, __rcvr), __errors_);
+            std::visit(__complete_fn(set_error, __rcvr), __errors_);
           }
           break;
         case __stopped:
