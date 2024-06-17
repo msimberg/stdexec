@@ -19,12 +19,11 @@
 #include <cassert>
 #include <exception>
 #include <utility>
+#include <variant>
 
 #include "../stdexec/coroutine.hpp"
 #include "../stdexec/execution.hpp"
 #include "../stdexec/__detail/__meta.hpp"
-#include "../stdexec/__detail/__optional.hpp"
-#include "../stdexec/__detail/__variant.hpp"
 
 #include "any_sender_of.hpp"
 #include "at_coroutine_exit.hpp"
@@ -89,8 +88,6 @@ namespace exec {
       __sticky
     };
 
-    struct __parent_promise_t {};
-
     template <__scheduler_affinity _SchedulerAffinity = __scheduler_affinity::__sticky>
     class __default_task_context_impl {
       template <class _ParentPromise>
@@ -104,14 +101,8 @@ namespace exec {
       inplace_stop_token __stop_token_;
 
      public:
-      template <class _ParentPromise>
-      explicit __default_task_context_impl(__parent_promise_t, _ParentPromise& __parent) noexcept {
-        if constexpr (_SchedulerAffinity == __scheduler_affinity::__sticky) {
-          __check_parent_promise_has_scheduler<_ParentPromise>();
-          __scheduler_ = get_scheduler(get_env(__parent));
-        }
-      }
-      
+      __default_task_context_impl() = default;
+
       template <scheduler _Scheduler>
       explicit __default_task_context_impl(_Scheduler&& __scheduler)
         : __scheduler_{static_cast<_Scheduler&&>(__scheduler)} {
@@ -160,6 +151,10 @@ namespace exec {
       explicit __default_awaiter_context(
         __default_task_context_impl<_Affinity>& __self,
         _ParentPromise& __parent) noexcept {
+        if constexpr (_Affinity == __scheduler_affinity::__sticky) {
+          __check_parent_promise_has_scheduler<_ParentPromise>();
+          __self.__scheduler_ = get_scheduler(get_env(__parent));
+        }
       }
     };
 
@@ -183,6 +178,10 @@ namespace exec {
         : __stop_callback_{
           get_stop_token(get_env(__parent)),
           __forward_stop_request{__stop_source_}} {
+        if constexpr (_Affinity == __scheduler_affinity::__sticky) {
+          __check_parent_promise_has_scheduler<_ParentPromise>();
+          __self.__scheduler_ = get_scheduler(get_env(__parent));
+        }
         static_assert(
           std::is_nothrow_constructible_v<__stop_callback_t, __stop_token_t, __forward_stop_request>);
         __self.__stop_token_ = __stop_source_.get_token();
@@ -201,6 +200,11 @@ namespace exec {
       explicit __default_awaiter_context(
         __default_task_context_impl<_Affinity>& __self,
         _ParentPromise& __parent) noexcept {
+        if constexpr (_Affinity == __scheduler_affinity::__sticky) {
+          __check_parent_promise_has_scheduler<_ParentPromise>();
+          __self.__scheduler_ = get_scheduler(get_env(__parent));
+        }
+
         __self.__stop_token_ = get_stop_token(get_env(__parent));
       }
     };
@@ -214,6 +218,10 @@ namespace exec {
       explicit __default_awaiter_context(
         __default_task_context_impl<_Affinity>& __self,
         _ParentPromise& __parent) noexcept {
+        if constexpr (_Affinity == __scheduler_affinity::__sticky) {
+          __check_parent_promise_has_scheduler<_ParentPromise>();
+          __self.__scheduler_ = get_scheduler(get_env(__parent));
+        }
       }
     };
 
@@ -225,12 +233,20 @@ namespace exec {
       explicit __default_awaiter_context(
         __default_task_context_impl<_Affinity>& __self,
         _ParentPromise& __parent) noexcept {
+        if constexpr (_Affinity == __scheduler_affinity::__sticky) {
+          __check_parent_promise_has_scheduler<_ParentPromise>();
+          __self.__scheduler_ = get_scheduler(get_env(__parent));
+        }
       }
 
       template <__scheduler_affinity _Affinity, __indirect_stop_token_provider _ParentPromise>
       explicit __default_awaiter_context(
         __default_task_context_impl<_Affinity>& __self,
         _ParentPromise& __parent) {
+        if constexpr (_Affinity == __scheduler_affinity::__sticky) {
+          __check_parent_promise_has_scheduler<_ParentPromise>();
+          __self.__scheduler_ = get_scheduler(get_env(__parent));
+        }
         // Register a callback that will request stop on this basic_task's
         // stop_source when stop is requested on the parent coroutine's stop
         // token.
@@ -261,10 +277,10 @@ namespace exec {
     template <class _Ty>
     struct __promise_base {
       void return_value(_Ty value) {
-        __data_.template emplace<0>(std::move(value));
+        __data_.template emplace<1>(std::move(value));
       }
 
-      __variant_for<_Ty, std::exception_ptr> __data_{};
+      std::variant<std::monostate, _Ty, std::exception_ptr> __data_{};
     };
 
     template <>
@@ -272,10 +288,10 @@ namespace exec {
       struct __void { };
 
       void return_void() {
-        __data_.template emplace<0>(__void{});
+        __data_.template emplace<1>(__void{});
       }
 
-      __variant_for<__void, std::exception_ptr> __data_{};
+      std::variant<std::monostate, __void, std::exception_ptr> __data_{};
     };
 
     enum class disposition : unsigned {
@@ -347,18 +363,11 @@ namespace exec {
 
         [[nodiscard]]
         auto disposition() const noexcept -> __task::disposition {
-          switch (this->__data_.index()) {
-          case 0:
-            return __task::disposition::succeeded;
-          case 1:
-            return __task::disposition::failed;
-          default:
-            return __task::disposition::stopped;
-          }
+          return static_cast<__task::disposition>(this->__data_.index());
         }
 
         void unhandled_exception() noexcept {
-          this->__data_.template emplace<1>(std::current_exception());
+          this->__data_.template emplace<2>(std::current_exception());
         }
 
         template <sender _Awaitable>
@@ -367,7 +376,7 @@ namespace exec {
           // TODO: If we have a complete-where-it-starts query then we can optimize
           // this to avoid the reschedule
           return as_awaitable(
-            transfer(static_cast<_Awaitable&&>(__awaitable), get_scheduler(*__context_)), *this);
+            transfer(static_cast<_Awaitable&&>(__awaitable), get_scheduler(__context_)), *this);
         }
 
         template <class _Scheduler>
@@ -376,7 +385,7 @@ namespace exec {
           -> decltype(auto) {
           if (!std::exchange(__rescheduled_, true)) {
             // Create a cleanup action that transitions back onto the current scheduler:
-            auto __sched = get_scheduler(*__context_);
+            auto __sched = get_scheduler(__context_);
             auto __cleanup_task = at_coroutine_exit(schedule, std::move(__sched));
             // Insert the cleanup action into the head of the continuation chain by making
             // direct calls to the cleanup task's awaiter member functions. See type
@@ -384,7 +393,7 @@ namespace exec {
             __cleanup_task.await_suspend(__coro::coroutine_handle<__promise>::from_promise(*this));
             (void) __cleanup_task.await_resume();
           }
-          __context_->set_scheduler(__box.__sched_);
+          __context_.set_scheduler(__box.__sched_);
           return as_awaitable(schedule(__box.__sched_), *this);
         }
 
@@ -397,17 +406,17 @@ namespace exec {
         using __context_t = typename _Context::template promise_context_t<__promise>;
 
         auto get_env() const noexcept -> const __context_t& {
-          return *__context_;
+          return __context_;
         }
 
-        __optional<__context_t> __context_{};
+        __context_t __context_;
         bool __rescheduled_{false};
       };
 
       template <class _ParentPromise = void>
       struct __task_awaitable {
         __coro::coroutine_handle<__promise> __coro_;
-        __optional<awaiter_context_t<__promise, _ParentPromise>> __context_{};
+        std::optional<awaiter_context_t<__promise, _ParentPromise>> __context_{};
 
         ~__task_awaitable() {
           if (__coro_)
@@ -422,8 +431,7 @@ namespace exec {
         auto await_suspend(__coro::coroutine_handle<_ParentPromise2> __parent) noexcept
           -> __coro::coroutine_handle<> {
           static_assert(__one_of<_ParentPromise, _ParentPromise2, void>);
-          __coro_.promise().__context_.emplace(__parent_promise_t(), __parent.promise());
-          __context_.emplace(*__coro_.promise().__context_, __parent.promise());
+          __context_.emplace(__coro_.promise().__context_, __parent.promise());
           __coro_.promise().set_continuation(__parent);
           if constexpr (requires { __coro_.promise().stop_requested() ? 0 : 1; }) {
             if (__coro_.promise().stop_requested())
@@ -437,10 +445,10 @@ namespace exec {
           scope_guard __on_exit{[this]() noexcept {
             std::exchange(__coro_, {}).destroy();
           }};
-          if (__coro_.promise().__data_.index() == 1)
-            std::rethrow_exception(std::move(__coro_.promise().__data_.template get<1>()));
+          if (__coro_.promise().__data_.index() == 2)
+            std::rethrow_exception(std::get<2>(std::move(__coro_.promise().__data_)));
           if constexpr (!std::is_void_v<_Ty>)
-            return std::move(__coro_.promise().__data_.template get<0>());
+            return std::get<1>(std::move(__coro_.promise().__data_));
         }
       };
 
