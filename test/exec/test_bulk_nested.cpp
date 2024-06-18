@@ -28,17 +28,19 @@ TEST_CASE("bulk_nested compiles", "[adaptors][bulk_nested]") {
         stdexec::just(42),
         10,
         // std::array{10},
-        [](// stdexec::scheduler auto sch,
+        [](stdexec::scheduler auto sch,
            int i, int &x) {
           std::cerr << "hello from outer index " << i
                     << " with inline scheduler\n";
-          // stdexec::sync_wait(
-          //     stdexec::schedule(sch) |
-          //     exec::bulk_nested(
-          //         std::array{3}, [](stdexec::scheduler auto, int j) {
-          //           std::cerr << "hello from inner index " << j
-          //                     << " with subscheduler of inline scheduler\n";
-          //         }));
+          stdexec::sync_wait(
+              stdexec::schedule(sch) |
+              exec::bulk_nested(
+                  // std::array{3},
+                  3,
+                  [](stdexec::scheduler auto, int j) {
+                    std::cerr << "hello from inner index " << j
+                              << " with subscheduler of inline scheduler\n";
+                  }));
         });
     stdexec::sync_wait(std::move(snd));
   }

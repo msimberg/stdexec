@@ -62,7 +62,7 @@ namespace exec {
           _Env,
           __transform<
             __q<__decay_ref>,
-            __mbind_front<__mtry_catch_q<__nothrow_invocable_t, _Catch>, _Fun, _Shape>>,
+            __mbind_front<__mtry_catch_q<__nothrow_invocable_t, _Catch>, _Fun, inline_scheduler, _Shape>>,
           __q<__mand>>,
         completion_signatures<>,
         __eptr_completion>;
@@ -136,15 +136,15 @@ namespace exec {
           _Args&&... __args) noexcept -> void {
         if constexpr (std::same_as<_Tag, set_value_t>) {
           using __shape_t = decltype(__state.__shape_);
-          if constexpr (noexcept(__state.__fun_(__shape_t{}, __args...))) {
+          if constexpr (noexcept(__state.__fun_(inline_scheduler{}, __shape_t{}, __args...))) {
             for (__shape_t __i{}; __i != __state.__shape_; ++__i) {
-              __state.__fun_(__i, __args...);
+              __state.__fun_(inline_scheduler{}, __i, __args...);
             }
             _Tag()(static_cast<_Receiver&&>(__rcvr), static_cast<_Args&&>(__args)...);
           } else {
             try {
               for (__shape_t __i{}; __i != __state.__shape_; ++__i) {
-                __state.__fun_(__i, __args...);
+                __state.__fun_(inline_scheduler{}, __i, __args...);
               }
               _Tag()(static_cast<_Receiver&&>(__rcvr), static_cast<_Args&&>(__args)...);
             } catch (...) {
