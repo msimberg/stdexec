@@ -67,26 +67,26 @@ TEST_CASE("bulk_nested compiles", "[adaptors][bulk_nested]") {
   }
 }
 
-// TEST_CASE("bulk_nested compiles with thread pool scheduler",
-//           "[adaptors][bulk_nested]") {
-//   exec::static_thread_pool pool_{2};
+TEST_CASE("bulk_nested compiles with thread pool scheduler",
+          "[adaptors][bulk_nested]") {
+  exec::static_thread_pool pool_{2};
 
-//   stdexec::sender auto snd =
-//       stdexec::transfer_just(pool_.get_scheduler(), 42) |
-//       // Levels 2- are completely ignored. They don't actually require any
-//       // setup in the default case. Should they be allowed?
-//       exec::bulk_nested(std::array{10, 17, 7}, [](stdexec::scheduler auto sch,
-//                                                   int i, int &x) {
-//         std::cerr << "hello from outer index " << i
-//                   << " with static thread pool scheduler\n";
-//         stdexec::sync_wait(
-//             stdexec::schedule(sch) |
-//             exec::bulk_nested(std::array{3}, [](stdexec::scheduler auto,
-//                                                 int j) {
-//               std::cerr
-//                   << "hello from inner index " << j
-//                   << " with subscheduler of static thread pool scheduler\n ";
-//             }));
-//       });
-//   stdexec::sync_wait(std::move(snd));
-// }
+  stdexec::sender auto snd =
+      stdexec::transfer_just(pool_.get_scheduler(), 42) |
+      // Levels 2- are completely ignored. They don't actually require any
+      // setup in the default case. Should they be allowed?
+      exec::bulk_nested(std::array{8, 17, 7}, [](stdexec::scheduler auto sch,
+                                                  int i, int &x) {
+        std::cerr << "hello from outer index " << i
+                  << " with static thread pool scheduler\n";
+        stdexec::sync_wait(
+            stdexec::schedule(sch) |
+            exec::bulk_nested(std::array{2}, [](stdexec::scheduler auto,
+                                                int j) {
+              std::cerr
+                  << "hello from inner index " << j
+                  << " with subscheduler of static thread pool scheduler\n ";
+            }));
+      });
+  stdexec::sync_wait(std::move(snd));
+}

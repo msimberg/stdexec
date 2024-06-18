@@ -244,6 +244,20 @@ namespace exec {
             pool_, static_cast<Sender&&>(sndr), shape, std::move(fun)};
         }
 
+        template <class Data, class Sender>
+        auto operator()(exec::bulk_nested_t, Data&& data, Sender&& sndr) {
+          auto [shape, fun] = static_cast<Data &&>(data);
+          using Shape =
+              typename stdexec::__decay_t<decltype(shape)>::value_type;
+          auto fun_sched =
+              [fun = std::move(fun)](Shape i, auto &...ts) mutable noexcept {
+                fun(inline_scheduler{}, i, ts...);
+              };
+          // TODO: Is an "empty" hierarchy {} useful?
+          return bulk_sender_t<Sender, Shape, decltype(fun_sched)>{
+              pool_, static_cast<Sender &&>(sndr), shape[0], std::move(fun_sched)};
+        }
+
         static_thread_pool_& pool_;
       };
 
@@ -290,6 +304,40 @@ namespace exec {
                 || __completes_on<Sender, static_thread_pool_::scheduler>,
               "No static_thread_pool_ instance can be found in the sender's or receiver's "
               "environment on which to schedule bulk work.");
+            return not_a_sender<__name_of<Sender>>();
+          }
+        }
+
+        // For eager customization
+        template <sender_expr_for<exec::bulk_nested_t> Sender>
+        auto transform_sender(Sender&& sndr) const noexcept {
+          if constexpr (__completes_on<Sender, static_thread_pool_::scheduler>) {
+            auto sched = get_completion_scheduler<set_value_t>(get_env(sndr));
+            return __sexpr_apply(static_cast<Sender&&>(sndr), transform_bulk{*sched.pool_});
+          } else {
+            static_assert(
+              __completes_on<Sender, static_thread_pool_::scheduler>,
+              "No static_thread_pool_ instance can be found in the sender's environment "
+              "on which to schedule bulk_nested work.");
+            return not_a_sender<__name_of<Sender>>();
+          }
+        }
+
+        // transform the generic bulk sender into a parallel thread-pool bulk sender
+        template <sender_expr_for<exec::bulk_nested_t> Sender, class Env>
+        auto transform_sender(Sender&& sndr, const Env& env) const noexcept {
+          if constexpr (__completes_on<Sender, static_thread_pool_::scheduler>) {
+            auto sched = get_completion_scheduler<set_value_t>(get_env(sndr));
+            return __sexpr_apply(static_cast<Sender&&>(sndr), transform_bulk{*sched.pool_});
+          } else if constexpr (__starts_on<Sender, static_thread_pool_::scheduler, Env>) {
+            auto sched = stdexec::get_scheduler(env);
+            return __sexpr_apply(static_cast<Sender&&>(sndr), transform_bulk{*sched.pool_});
+          } else {
+            static_assert( //
+              __starts_on<Sender, static_thread_pool_::scheduler, Env>
+                || __completes_on<Sender, static_thread_pool_::scheduler>,
+              "No static_thread_pool_ instance can be found in the sender's or receiver's "
+              "environment on which to schedule bulk_nested work.");
             return not_a_sender<__name_of<Sender>>();
           }
         }
@@ -462,17 +510,6 @@ namespace exec {
       [[nodiscard]]
       auto available_parallelism() const -> std::uint32_t {
         return threadCount_;
-      }
-
-      template <stdexec::sender S, std::integral Shape, std::size_t N, class Fn>
-      friend auto
-        tag_invoke(exec::bulk_nested_t, const scheduler& sch, S&& sndr, std::array<Shape, N> shape, Fn fun) noexcept {
-        auto fun_sched = [fun = (Fn&&) fun](Shape i, auto&... ts) mutable noexcept {
-          fun(inline_scheduler{}, i, ts...);
-        };
-        // TODO: Is an "empty" hierarchy {} useful?
-        static_assert(N >= 1);
-        return bulk_sender_t<S, Shape, decltype(fun_sched)>{*sch.pool_, (S&&) sndr, shape[0], std::move(fun_sched)};
       }
 
       [[nodiscard]]
