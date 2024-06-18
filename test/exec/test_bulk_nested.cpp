@@ -43,28 +43,28 @@ TEST_CASE("bulk_nested compiles", "[adaptors][bulk_nested]") {
     stdexec::sync_wait(std::move(snd));
   }
 
-  // {
-  //   stdexec::sender auto snd = exec::bulk_nested(
-  //       // Levels 2 onwards are completely ignored in the default case. They
-  //       // don't actually require any setup in the default case. Should they be
-  //       // allowed?
-  //       stdexec::just(42), std::array{10, 17, 7},
-  //       [](stdexec::scheduler auto sch, int i, int &x) {
-  //         std::cerr << "hello from outer index " << i
-  //                   << " with inline scheduler\n";
-  //         stdexec::sync_wait(
-  //             stdexec::schedule(sch) |
-  //             // Can specify any hierarchy here again. The second level from
-  //             // above is completely decoupled (ignored) from the level
-  //             // specified above. That's ok!?
-  //             exec::bulk_nested(
-  //                 std::array{3}, [](stdexec::scheduler auto, int j) {
-  //                   std::cerr << "hello from inner index " << j
-  //                             << " with subscheduler of inline scheduler\n";
-  //                 }));
-  //       });
-  //   stdexec::sync_wait(std::move(snd));
-  // }
+  {
+    stdexec::sender auto snd = exec::bulk_nested(
+        // Levels 2 onwards are completely ignored in the default case. They
+        // don't actually require any setup in the default case. Should they be
+        // allowed?
+        stdexec::just(42), std::array{10, 17, 7},
+        [](stdexec::scheduler auto sch, int i, int &x) {
+          std::cerr << "hello from outer index " << i
+                    << " with inline scheduler\n";
+          stdexec::sync_wait(
+              stdexec::schedule(sch) |
+              // Can specify any hierarchy here again. The second level from
+              // above is completely decoupled (ignored) from the level
+              // specified above. That's ok!?
+              exec::bulk_nested(
+                  std::array{4}, [](stdexec::scheduler auto, int j) {
+                    std::cerr << "hello from inner index " << j
+                              << " with subscheduler of inline scheduler\n";
+                  }));
+        });
+    stdexec::sync_wait(std::move(snd));
+  }
 }
 
 // TEST_CASE("bulk_nested compiles with thread pool scheduler",
