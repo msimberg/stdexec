@@ -62,7 +62,7 @@ namespace exec {
           _Env,
           __transform<
             __q<__decay_ref>,
-            __mbind_front<__mtry_catch_q<__nothrow_invocable_t, _Catch>, _Fun, inline_scheduler, _Shape>>,
+            __mbind_front<__mtry_catch_q<__nothrow_invocable_t, _Catch>, _Fun, inline_scheduler, typename _Shape::value_type>>,
           __q<__mand>>,
         completion_signatures<>,
         __eptr_completion>;
@@ -75,7 +75,7 @@ namespace exec {
         __with_error_invoke_t<_CvrefSender, _Env, _Shape, _Fun, __on_not_callable>>;
 
     struct bulk_nested_t {
-      template <sender _Sender, integral _Shape, __movable_value _Fun>
+      template <sender _Sender, class _Shape, __movable_value _Fun>
       STDEXEC_ATTRIBUTE((host, device))
       auto
         operator()(_Sender&& __sndr, _Shape __shape, _Fun __fun) const -> __well_formed_sender
@@ -87,7 +87,7 @@ namespace exec {
             __data{__shape, static_cast<_Fun&&>(__fun)}, static_cast<_Sender&&>(__sndr)));
       }
 
-      template <integral _Shape, class _Fun>
+      template <class _Shape, class _Fun>
       STDEXEC_ATTRIBUTE((always_inline))
       auto
         operator()(_Shape __shape, _Fun __fun) const -> __binder_back<bulk_nested_t, _Shape, _Fun> {
@@ -135,15 +135,15 @@ namespace exec {
           _Tag,
           _Args&&... __args) noexcept -> void {
         if constexpr (std::same_as<_Tag, set_value_t>) {
-          using __shape_t = decltype(__state.__shape_);
+          using __shape_t = decltype(__state.__shape_)::value_type;
           if constexpr (noexcept(__state.__fun_(inline_scheduler{}, __shape_t{}, __args...))) {
-            for (__shape_t __i{}; __i != __state.__shape_; ++__i) {
+            for (__shape_t __i{}; __i != __state.__shape_[0]; ++__i) {
               __state.__fun_(inline_scheduler{}, __i, __args...);
             }
             _Tag()(static_cast<_Receiver&&>(__rcvr), static_cast<_Args&&>(__args)...);
           } else {
             try {
-              for (__shape_t __i{}; __i != __state.__shape_; ++__i) {
+              for (__shape_t __i{}; __i != __state.__shape_[0]; ++__i) {
                 __state.__fun_(inline_scheduler{}, __i, __args...);
               }
               _Tag()(static_cast<_Receiver&&>(__rcvr), static_cast<_Args&&>(__args)...);
