@@ -48,6 +48,7 @@ set(stdexec_examples
     "example.server_theme.on_transfer : server_theme/on_transfer.cpp"
       "example.server_theme.then_upon : server_theme/then_upon.cpp"
      "example.server_theme.split_bulk : server_theme/split_bulk.cpp"
+         "example.benchmark.task_size : benchmark/task_size.cpp"
 "example.benchmark.static_thread_pool : benchmark/static_thread_pool.cpp"
 "example.benchmark.static_thread_pool_old : benchmark/static_thread_pool_old.cpp"
 "example.benchmark.static_thread_pool_nested : benchmark/static_thread_pool_nested.cpp"
